@@ -1,5 +1,6 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import { ARENA_HALF, OBSTACLES, PLATFORMS, RAMPS, Ramp } from "../../../shared/protocol";
+import { clampPlayable } from "../../../shared/arena";
 import { rotateYawVector } from "../../../shared/mathutil";
 
 export interface CarControls {
@@ -28,6 +29,7 @@ const CAR_FOOTPRINT_X = 1.15;
 const CAR_FOOTPRINT_Z = 2.15;
 const RAMP_THICKNESS = 0.65;
 const PLATFORM_THICKNESS = 0.8;
+const MAX_BODY_Y = 18;
 
 function onPlatform(x: number, z: number, w: number, d: number, px: number, pz: number) {
   return x >= px - w / 2 && x <= px + w / 2 && z >= pz - d / 2 && z <= pz + d / 2;
@@ -75,7 +77,7 @@ export class Physics {
 
     const wall = (x: number, z: number, hx: number, hz: number) =>
       this.world.createCollider(
-        RAPIER.ColliderDesc.cuboid(hx, 2, hz).setTranslation(x, 2, z),
+        RAPIER.ColliderDesc.cuboid(hx, 9, hz).setTranslation(x, 9, z),
       );
     wall(0, -ARENA_HALF - 1, ARENA_HALF + 2, 1);
     wall(0, ARENA_HALF + 1, ARENA_HALF + 2, 1);
@@ -174,11 +176,45 @@ export class Physics {
     return y <= target + 0.14 && Math.abs(vy) < 0.75;
   }
 
+  /** Keep cars inside the playable volume and recover from falls. */
+  enforceBounds(body: RAPIER.RigidBody) {
+    const t = body.translation();
+    const v = body.linvel();
+    const { x, z } = clampPlayable(t.x, t.z);
+    if (x !== t.x || z !== t.z) {
+      body.setTranslation({ x, y: t.y, z }, true);
+      body.setLinvel({ x: v.x * 0.25, y: v.y, z: v.z * 0.25 }, true);
+    }
+
+    const pos = body.translation();
+    const vel = body.linvel();
+    const targetY = this.targetHoverY(body);
+    let y = pos.y;
+
+    if (y < targetY - 2.5) {
+      y = targetY;
+      body.setLinvel({ x: vel.x * 0.35, y: 0, z: vel.z * 0.35 }, true);
+    } else if (y > MAX_BODY_Y) {
+      y = MAX_BODY_Y;
+      body.setLinvel({ x: vel.x, y: Math.min(0, vel.y), z: vel.z }, true);
+    }
+
+    if (y !== pos.y) body.setTranslation({ x: pos.x, y, z: pos.z }, true);
+  }
+
+  /** Small pop to escape minor geometry snags. */
+  unstick(body: RAPIER.RigidBody) {
+    const v = body.linvel();
+    body.setLinvel({ x: v.x * 0.2, y: 4.5, z: v.z * 0.2 }, true);
+    body.applyTorqueImpulse({ x: 0, y: (Math.random() - 0.5) * 40, z: 0 }, true);
+  }
+
   step(dt: number) {
     const substeps = 3;
     const h = Math.min(dt / substeps, 1 / 60);
     this.world.timestep = h;
     for (let i = 0; i < substeps; i++) this.world.step();
+    for (const body of this.carBodies) this.enforceBounds(body);
   }
 
   updateHover(body: RAPIER.RigidBody, diving = false) {

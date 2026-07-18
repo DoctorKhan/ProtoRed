@@ -44,33 +44,33 @@ export interface Ramp {
 }
 
 export const PLATFORMS: Platform[] = [
-  { x: -42, z: -42, w: 22, d: 22, y: 5 },
-  { x: 42, z: -42, w: 22, d: 22, y: 5 },
-  { x: -42, z: 42, w: 22, d: 22, y: 5 },
-  { x: 42, z: 42, w: 22, d: 22, y: 5 },
-  { x: 0, z: -38, w: 44, d: 16, y: 10 },
-  { x: 0, z: 38, w: 44, d: 16, y: 10 },
-  { x: -38, z: 0, w: 16, d: 44, y: 10 },
-  { x: 38, z: 0, w: 16, d: 44, y: 10 },
-  { x: 0, z: 0, w: 20, d: 20, y: 14 },
+  { x: -40, z: -40, w: 20, d: 20, y: 5 },
+  { x: 40, z: -40, w: 20, d: 20, y: 5 },
+  { x: -40, z: 40, w: 20, d: 20, y: 5 },
+  { x: 40, z: 40, w: 20, d: 20, y: 5 },
+  { x: 0, z: -36, w: 40, d: 14, y: 10 },
+  { x: 0, z: 36, w: 40, d: 14, y: 10 },
+  { x: -36, z: 0, w: 14, d: 40, y: 10 },
+  { x: 36, z: 0, w: 14, d: 40, y: 10 },
+  { x: 0, z: 0, w: 18, d: 18, y: 14 },
 ];
 
 export const RAMPS: Ramp[] = [
   // ground → corner decks (y=5)
-  { x: -42, z: -28, length: 22, width: 10, yLow: 0, yHigh: 5, heading: -Math.PI / 2 },
-  { x: 42, z: -28, length: 22, width: 10, yLow: 0, yHigh: 5, heading: -Math.PI / 2 },
-  { x: -42, z: 28, length: 22, width: 10, yLow: 0, yHigh: 5, heading: Math.PI / 2 },
-  { x: 42, z: 28, length: 22, width: 10, yLow: 0, yHigh: 5, heading: Math.PI / 2 },
+  { x: -40, z: -27, length: 20, width: 9, yLow: 0, yHigh: 5, heading: -Math.PI / 2 },
+  { x: 40, z: -27, length: 20, width: 9, yLow: 0, yHigh: 5, heading: -Math.PI / 2 },
+  { x: -40, z: 27, length: 20, width: 9, yLow: 0, yHigh: 5, heading: Math.PI / 2 },
+  { x: 40, z: 27, length: 20, width: 9, yLow: 0, yHigh: 5, heading: Math.PI / 2 },
   // corner decks → mid ring (y=10)
-  { x: -28, z: -42, length: 24, width: 9, yLow: 5, yHigh: 10, heading: 0 },
-  { x: 28, z: -42, length: 24, width: 9, yLow: 5, yHigh: 10, heading: Math.PI },
-  { x: -28, z: 42, length: 24, width: 9, yLow: 5, yHigh: 10, heading: 0 },
-  { x: 28, z: 42, length: 24, width: 9, yLow: 5, yHigh: 10, heading: Math.PI },
+  { x: -27, z: -40, length: 22, width: 8, yLow: 5, yHigh: 10, heading: 0 },
+  { x: 27, z: -40, length: 22, width: 8, yLow: 5, yHigh: 10, heading: Math.PI },
+  { x: -27, z: 40, length: 22, width: 8, yLow: 5, yHigh: 10, heading: 0 },
+  { x: 27, z: 40, length: 22, width: 8, yLow: 5, yHigh: 10, heading: Math.PI },
   // mid ring → sky deck (y=14)
-  { x: 0, z: -26, length: 20, width: 8, yLow: 10, yHigh: 14, heading: -Math.PI / 2 },
-  { x: 0, z: 26, length: 20, width: 8, yLow: 10, yHigh: 14, heading: Math.PI / 2 },
-  { x: -26, z: 0, length: 20, width: 8, yLow: 10, yHigh: 14, heading: 0 },
-  { x: 26, z: 0, length: 20, width: 8, yLow: 10, yHigh: 14, heading: Math.PI },
+  { x: 0, z: -24, length: 18, width: 7, yLow: 10, yHigh: 14, heading: -Math.PI / 2 },
+  { x: 0, z: 24, length: 18, width: 7, yLow: 10, yHigh: 14, heading: Math.PI / 2 },
+  { x: -24, z: 0, length: 18, width: 7, yLow: 10, yHigh: 14, heading: 0 },
+  { x: 24, z: 0, length: 18, width: 7, yLow: 10, yHigh: 14, heading: Math.PI },
 ];
 
 export interface CarState {

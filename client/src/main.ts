@@ -20,7 +20,9 @@ const hudSpeed = document.getElementById("hud-speed")!;
 const hudSpeedFill = document.getElementById("hud-speed-fill")!;
 const hudMission = document.getElementById("hud-mission")!;
 const audio = new GameAudio();
+audio.bindUnlock();
 let raceStarted = false;
+let playerGrounded = true;
 
 const KEY_LS = "pc_openrouter_key";
 const MODEL_LS = "pc_model";
@@ -163,7 +165,16 @@ async function startGame() {
         playersById.set(p.id, p);
         renderer.addCar(p);
       },
-      onSnapshot: (cars) => renderer.pushSnapshot(cars),
+      onSnapshot: (cars) => {
+        renderer.pushSnapshot(cars);
+        const myId = game?.myId;
+        if (!myId) return;
+        const me = cars.find((c) => c.id === myId);
+        if (me) {
+          if (me.grounded && !playerGrounded) audio.land();
+          playerGrounded = me.grounded ?? true;
+        }
+      },
       onChat: (m) => {
         const p = playersById.get(m.id);
         appendChat(m.name, p?.color ?? "#dde3ee", m.isBot, m.text);
@@ -174,8 +185,10 @@ async function startGame() {
         if (m.level === 0) hudMission.textContent = "MISSION — COMPLETE";
         else hudMission.textContent = `MISSION — L${m.level} ACTIVE`;
       },
-      onCtfSolved: (m) =>
-        appendSystem(`★ Solved Level ${m.level} — ${m.title}. Lesson: ${m.lesson}`),
+      onCtfSolved: (m) => {
+        audio.ctfSolved();
+        appendSystem(`★ Solved Level ${m.level} — ${m.title}. Lesson: ${m.lesson}`);
+      },
       onNotice: (t) => appendSystem(t),
       onJump: (id) => {
         if (id === game?.myId) audio.jump();
@@ -289,6 +302,12 @@ function animate() {
     const controls = readControls(false);
     renderer.setPlayerInput(controls.steer, controls.throttle);
     const { speed, maxSpeed } = renderer.getHudState();
+    audio.updateEngine(
+      speed,
+      controls.throttle,
+      controls.handbrake ?? false,
+      playerGrounded,
+    );
     const kph = Math.round(speed * 3.6);
     hudSpeed.textContent = String(kph);
     hudSpeedFill.style.width = `${Math.min(100, (speed / maxSpeed) * 100)}%`;

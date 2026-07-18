@@ -50,8 +50,8 @@ describe("physics collision", () => {
 
   it("hovers at elevated platform height", async () => {
     const physics = await createPhysics();
-    const body = physics.spawn(-42, -42, 0);
-    body.setTranslation({ x: -42, y: 6.2, z: -42 }, true);
+    const body = physics.spawn(-40, -40, 0);
+    body.setTranslation({ x: -40, y: 6.2, z: -40 }, true);
     body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     for (let i = 0; i < 180; i++) {
       physics.drive(body, { throttle: 0, brake: 0, steer: 0 });
@@ -89,5 +89,17 @@ describe("physics collision", () => {
     const lt = lower.translation();
     expect(ut.y).toBeGreaterThan(lt.y + 0.35);
     expect(physics.getSurfaceY(upper)).toBeGreaterThan(1.4);
+  });
+
+  it("keeps cars inside playable bounds", async () => {
+    const physics = await createPhysics();
+    const body = physics.spawn(0, 0, 0);
+    body.setTranslation({ x: 80, y: 1.2, z: -80 }, true);
+    body.setLinvel({ x: 40, y: 0, z: -40 }, true);
+    for (let i = 0; i < 120; i++) physics.step(1 / 60);
+    const t = body.translation();
+    expect(Math.abs(t.x)).toBeLessThanOrEqual(52.5);
+    expect(Math.abs(t.z)).toBeLessThanOrEqual(52.5);
+    expect(t.y).toBeGreaterThan(0.5);
   });
 });

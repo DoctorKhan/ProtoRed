@@ -14,6 +14,7 @@ import {
 } from "../../../shared/brain";
 import { DecisionEvidence, detectLevel, creditFor, LEVELS } from "../../../shared/detectors";
 import { ARENA_HALF, BotAction, CarState, PlayerInfo } from "../../../shared/protocol";
+import { clampPlayable, pickSpawnPoint } from "../../../shared/arena";
 import { yawFromQuat, steerToward } from "../../../shared/mathutil";
 
 const BOT_THINK_S = 9;
@@ -45,6 +46,7 @@ export interface Player {
   bot?: BotRuntime;
   styleId?: string;
   nextJump?: number;
+  stuckSince?: number;
 }
 
 export interface GameStateSnapshot {
@@ -92,13 +94,11 @@ export class Game {
   }
 
   private spawnPoint() {
-    const angle = Math.random() * Math.PI * 2;
-    const r = ARENA_HALF * 0.6;
-    return {
-      x: Math.cos(angle) * r,
-      z: Math.sin(angle) * r,
-      heading: Math.random() * Math.PI * 2,
-    };
+    const existing = [...this.players.values()].map((p) => {
+      const t = p.body.translation();
+      return { x: t.x, z: t.z };
+    });
+    return pickSpawnPoint(existing);
   }
 
   /** Spawn the AI drivers. Call once, before join(). */
@@ -201,6 +201,7 @@ export class Game {
     this.simTime += dt;
     for (const p of this.players.values()) {
       if (p.bot) this.botControls(p);
+      else this.humanControls(p);
       if (p.controls.jump && this.simTime >= (p.nextJump ?? 0)) {
         if (this.physics.tryJump(p.body)) {
           p.nextJump = this.simTime + JUMP_COOLDOWN;
@@ -386,21 +387,21 @@ export class Game {
         const dx = t.x - tt.x;
         const dz = t.z - tt.z;
         const len = Math.hypot(dx, dz) || 1;
-        target = {
-          x: Math.max(-ARENA_HALF + 8, Math.min(ARENA_HALF - 8, t.x + (dx / len) * 30)),
-          z: Math.max(-ARENA_HALF + 8, Math.min(ARENA_HALF - 8, t.z + (dz / len) * 30)),
-        };
+        target = clampPlayable(
+          t.x + (dx / len) * 30,
+          t.z + (dz / len) * 30,
+        );
       }
     } else if (a.kind === "goto" && a.x !== null && a.z !== null) {
-      target = { x: a.x, z: a.z };
+      target = clampPlayable(a.x, a.z);
     }
 
     if (!target) {
       if (!bot.wander || Math.hypot(bot.wander.x - t.x, bot.wander.z - t.z) < 6) {
-        bot.wander = {
-          x: (Math.random() * 2 - 1) * (ARENA_HALF - 12),
-          z: (Math.random() * 2 - 1) * (ARENA_HALF - 12),
-        };
+        bot.wander = clampPlayable(
+          (Math.random() * 2 - 1) * (ARENA_HALF - 16),
+          (Math.random() * 2 - 1) * (ARENA_HALF - 16),
+        );
       }
       target = bot.wander;
     }
@@ -413,5 +414,22 @@ export class Game {
     const throttle = Math.abs(angle) > 2.2 ? 0.4 : 1;
     const brake = dist < 8 && speed > 12 && a.kind === "goto" ? 0.5 : 0;
     p.controls = { throttle, brake, steer };
+  }
+
+  /** Nudge the human driver if wedged against geometry while trying to move. */
+  private humanControls(p: Player) {
+    const now = this.simTime;
+    const v = p.body.linvel();
+    const speed = Math.hypot(v.x, v.z);
+    const trying = p.controls.throttle > 0.2 || p.controls.brake > 0.2;
+    if (trying && speed < 0.55) {
+      if (p.stuckSince === undefined) p.stuckSince = now;
+      else if (now - p.stuckSince > 2.8) {
+        this.physics.unstick(p.body);
+        p.stuckSince = undefined;
+      }
+    } else {
+      p.stuckSince = undefined;
+    }
   }
 }
