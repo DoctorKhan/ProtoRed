@@ -6,20 +6,25 @@
     <title>Redliner Protocol</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { height: 100%; overflow: hidden; background: #000000; }
-      body { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #b8e8f8; }
+      html, body { height: 100%; overflow: hidden; background: #0c0616; }
+      body { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #f2e6ff; font-size: 15px; line-height: 1.5; }
 
       :root {
-        --glass: rgba(0, 4, 8, 0.82);
-        --border: rgba(0, 238, 255, 0.28);
+        --ui-xs: 12px;
+        --ui-sm: 13px;
+        --ui-base: 15px;
+        --ui-md: 16px;
+        --ui-lg: 18px;
+        --glass: rgba(18, 8, 28, 0.84);
+        --border: rgba(255, 92, 171, 0.32);
         --accent-race: #ff7a2f;
-        --accent-grid: #00eeff;
-        --accent-feed: #00eeff;
-        --accent-mission: #ffb347;
-        --accent-chat: #7af0ff;
-        --accent-key: #33cc88;
-        --text-dim: #3a6670;
-        --text-muted: #6a9aaa;
+        --accent-grid: #42ffd8;
+        --accent-feed: #8b6cff;
+        --accent-mission: #ffc86b;
+        --accent-chat: #ff9fd4;
+        --accent-key: #42ffd8;
+        --text-dim: #5a4870;
+        --text-muted: #9a88b8;
       }
 
       #app { position: fixed; inset: 0; }
@@ -28,8 +33,9 @@
       #join {
         position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
         background:
-          radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0, 238, 255, 0.07) 0%, transparent 70%),
-          #000000;
+          radial-gradient(ellipse 80% 60% at 50% 40%, rgba(255, 92, 171, 0.12) 0%, transparent 70%),
+          radial-gradient(ellipse 60% 50% at 30% 60%, rgba(66, 255, 216, 0.08) 0%, transparent 65%),
+          #0c0616;
         flex-direction: column; gap: 20px; z-index: 20;
         transition: opacity 0.35s;
       }
@@ -37,7 +43,7 @@
       #join h1 {
         font-size: clamp(36px, 6vw, 58px); font-weight: 900; letter-spacing: 6px;
         color: #fff;
-        text-shadow: 0 0 40px rgba(0, 238, 255, 0.5), 0 0 12px rgba(0, 238, 255, 0.25);
+        text-shadow: 0 0 40px rgba(255, 92, 171, 0.45), 0 0 18px rgba(66, 255, 216, 0.25);
         line-height: 1.1; text-align: center;
       }
       #join .tagline {
@@ -64,18 +70,18 @@
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
       }
       .controls-title {
-        color: var(--accent-grid); font-size: 9px; letter-spacing: 2px;
+        color: var(--accent-grid); font-size: var(--ui-xs); letter-spacing: 2px;
         margin-bottom: 10px; font-weight: 700;
       }
       .controls-grid {
-        display: grid; grid-template-columns: auto auto; gap: 6px 20px; align-items: center;
+        display: grid; grid-template-columns: auto auto; gap: 8px 24px; align-items: center;
       }
-      .control { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 11px; }
+      .control { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--ui-base); }
       .control .action { color: #c8d0e0; }
       .key {
-        display: inline-block; background: #000810; color: var(--accent-grid);
-        border: 1px solid rgba(0, 238, 255, 0.4); padding: 1px 6px; border-radius: 4px;
-        font-weight: 700; font-size: 10px; min-width: 18px; text-align: center;
+        display: inline-block; background: #120818; color: var(--accent-grid);
+        border: 1px solid rgba(66, 255, 216, 0.38); padding: 2px 8px; border-radius: 4px;
+        font-weight: 700; font-size: var(--ui-sm); min-width: 22px; text-align: center;
       }
 
       /* ── controls overlay (H or ? button) ── */
@@ -87,11 +93,11 @@
         transition: opacity 0.2s;
       }
       #controls-overlay.open { opacity: 1; pointer-events: auto; }
-      #controls-overlay .controls-panel { width: min(360px, 92vw); }
+      #controls-overlay .controls-panel { width: min(420px, 92vw); }
       #controls-overlay .controls-note {
         margin-top: 12px; padding-top: 10px;
         border-top: 1px solid rgba(255, 255, 255, 0.06);
-        font-size: 10px; color: var(--text-dim); line-height: 1.5;
+        font-size: var(--ui-sm); color: var(--text-dim); line-height: 1.55;
       }
 
       /* ── bottom dock ── */
@@ -104,32 +110,32 @@
         box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
       }
       .dock-btn {
-        background: rgba(0, 238, 255, 0.08); border: 1px solid rgba(0, 238, 255, 0.35);
+        background: rgba(255, 92, 171, 0.1); border: 1px solid rgba(255, 92, 171, 0.38);
         color: var(--accent-grid); font: inherit; font-size: 12px; font-weight: 800;
         width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
         transition: background 0.15s, box-shadow 0.15s;
       }
-      .dock-btn:hover { background: rgba(0, 238, 255, 0.16); }
+      .dock-btn:hover { background: rgba(255, 92, 171, 0.18); }
       .dock-btn.active {
-        background: rgba(0, 238, 255, 0.22);
-        box-shadow: 0 0 16px rgba(0, 238, 255, 0.25);
+        background: rgba(66, 255, 216, 0.2);
+        box-shadow: 0 0 16px rgba(66, 255, 216, 0.28);
       }
       #dock-hint {
-        font-size: 10px; color: var(--text-dim); letter-spacing: 0.3px;
+        font-size: var(--ui-sm); color: var(--text-dim); letter-spacing: 0.3px;
         padding: 0 6px; white-space: nowrap;
       }
       .dock-sep { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.08); }
 
       /* ── right panel tabs ── */
       #panel-tabs {
-        position: fixed; right: 16px; top: 16px; z-index: 11;
+        position: fixed; right: 16px; top: 16px; z-index: 13;
         display: flex; gap: 4px;
       }
       .panel-tab {
         background: var(--glass); border: 1px solid rgba(255, 255, 255, 0.08);
-        color: var(--text-dim); font: inherit; font-size: 9px; font-weight: 700;
-        letter-spacing: 1.5px; padding: 7px 12px; border-radius: 6px;
+        color: var(--text-dim); font: inherit; font-size: var(--ui-xs); font-weight: 700;
+        letter-spacing: 1.5px; padding: 9px 14px; border-radius: 6px;
         cursor: pointer; backdrop-filter: blur(8px);
         transition: color 0.15s, border-color 0.15s, background 0.15s;
       }
@@ -145,27 +151,50 @@
 
       /* ── speed HUD ── */
       #hud {
-        position: fixed; left: 16px; top: 16px; z-index: 10;
+        position: fixed; left: 16px; top: 16px; z-index: 13;
         background: var(--glass); border: 1px solid var(--border);
         border-left: 3px solid var(--accent-race);
         box-shadow: 0 0 24px rgba(0, 238, 255, 0.06);
-        padding: 12px 16px; border-radius: 6px;
+        padding: 14px 18px; border-radius: 6px;
         backdrop-filter: blur(8px);
-        display: flex; flex-direction: column; gap: 4px; min-width: 120px;
+        display: flex; flex-direction: column; gap: 6px; min-width: 148px;
       }
       #hud-speed {
-        font-size: 42px; font-weight: 900; color: #fff; line-height: 1;
+        font-size: 46px; font-weight: 900; color: #fff; line-height: 1;
         font-variant-numeric: tabular-nums;
         text-shadow: 0 0 20px rgba(255, 122, 47, 0.4);
       }
-      #hud-speed-unit { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; }
+      #hud-speed-unit { font-size: var(--ui-sm); color: var(--text-dim); letter-spacing: 1px; }
       #hud-status {
-        font-size: 10px; color: var(--accent-race); letter-spacing: 1.5px;
+        font-size: var(--ui-sm); color: var(--accent-race); letter-spacing: 1.5px;
         font-weight: 700; margin-top: 4px;
       }
       #hud-mission {
-        font-size: 10px; color: var(--text-muted); letter-spacing: 0.5px;
+        font-size: var(--ui-sm); color: var(--text-muted); letter-spacing: 0.5px;
       }
+      #hud-economy {
+        margin-top: 8px; padding-top: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex; flex-direction: column; gap: 3px;
+      }
+      #hud-redbucks {
+        font-size: var(--ui-lg); font-weight: 800; color: var(--accent-mission);
+        letter-spacing: 0.5px;
+      }
+      #hud-redbucks.ledger-flash {
+        color: #fff8a8;
+        text-shadow: 0 0 12px rgba(255, 204, 85, 0.85);
+      }
+      #hud-hull {
+        font-size: var(--ui-base); color: var(--text-muted);
+      }
+      #hud-repair {
+        font-size: var(--ui-base); color: var(--accent-grid); font-weight: 700;
+        opacity: 0.55; transition: opacity 0.2s, color 0.2s;
+        line-height: 1.45;
+      }
+      #hud-repair.visible { opacity: 1; }
+      #hud-repair.danger { color: #ff6644; }
       .speed-bar {
         height: 3px; background: rgba(255, 85, 34, 0.15); border-radius: 999px;
         overflow: hidden; margin-top: 6px; width: 100%;
@@ -178,89 +207,127 @@
 
       /* ── race feed ── */
       #telemetry {
-        position: fixed; right: 16px; top: 52px; width: 320px; z-index: 10;
+        position: fixed; right: 16px; top: 56px; width: min(380px, calc(100vw - 32px)); z-index: 13;
         background: var(--glass); border: 1px solid rgba(77, 212, 255, 0.18);
         border-left: 3px solid var(--accent-feed);
-        border-radius: 6px; padding: 10px 12px;
-        font-size: 10px; line-height: 1.55; backdrop-filter: blur(8px);
-        max-height: min(240px, 32vh); overflow: hidden; display: flex; flex-direction: column;
+        border-radius: 6px; padding: 12px 14px;
+        font-size: var(--ui-base); line-height: 1.55; backdrop-filter: blur(8px);
+        max-height: min(280px, 36vh); overflow: hidden; display: flex; flex-direction: column;
         transition: opacity 0.2s, transform 0.2s;
       }
       #telemetry.hidden { opacity: 0; pointer-events: none; transform: translateX(8px); }
       #telemetry h2 {
-        font-size: 9px; color: var(--accent-feed); letter-spacing: 2px;
-        margin-bottom: 8px; font-weight: 700; flex: none;
+        font-size: var(--ui-xs); color: var(--accent-feed); letter-spacing: 2px;
+        margin-bottom: 10px; font-weight: 700; flex: none;
       }
       #telemetry-log { overflow-y: auto; flex: 1; }
-      #telemetry .entry { margin-bottom: 5px; color: var(--text-muted); }
+      #telemetry .entry { margin-bottom: 6px; color: var(--text-muted); }
       #telemetry .entry b { color: #dde3ee; }
-      #telemetry .src { opacity: 0.5; font-size: 9px; }
+      #telemetry .src { opacity: 0.55; font-size: var(--ui-xs); }
 
       /* ── mission console ── */
       #ctf {
-        position: fixed; right: 16px; top: 52px; width: 320px; z-index: 10;
+        position: fixed; right: 16px; top: 56px; width: min(380px, calc(100vw - 32px)); z-index: 13;
         background: var(--glass); border: 1px solid rgba(255, 179, 71, 0.18);
         border-left: 3px solid var(--accent-mission);
-        border-radius: 6px; padding: 10px 12px; font-size: 10px;
+        border-radius: 6px; padding: 12px 14px; font-size: var(--ui-base);
         backdrop-filter: blur(8px);
         max-height: min(calc(100vh - 120px), 70vh); overflow-y: auto;
         transition: opacity 0.2s, transform 0.2s;
       }
       #ctf.hidden { opacity: 0; pointer-events: none; transform: translateX(8px); }
       #ctf h2 {
-        font-size: 9px; color: var(--accent-mission); letter-spacing: 2px;
-        margin-bottom: 10px; font-weight: 700;
+        font-size: var(--ui-xs); color: var(--accent-mission); letter-spacing: 2px;
+        margin-bottom: 12px; font-weight: 700;
       }
       #ctf .lvl {
-        display: flex; gap: 7px; padding: 6px 0;
+        display: flex; gap: 8px; padding: 8px 0;
         border-top: 1px solid rgba(255, 255, 255, 0.05); align-items: baseline;
       }
       #ctf .lvl:first-of-type { border-top: 0; }
       #ctf .badge {
-        flex: none; width: 16px; height: 16px; border-radius: 3px;
-        text-align: center; line-height: 16px; font-size: 9px; font-weight: 700;
+        flex: none; width: 20px; height: 20px; border-radius: 4px;
+        text-align: center; line-height: 20px; font-size: var(--ui-xs); font-weight: 700;
       }
       #ctf .locked   { background: #141a24; color: #4a5568; border: 1px solid #1e2636; }
       #ctf .current  { background: var(--accent-mission); color: #14100a; }
       #ctf .solved   { background: var(--accent-key); color: #08130d; }
       #ctf .body { flex: 1; }
-      #ctf .title { font-weight: 700; color: #dde3ee; font-size: 10px; }
+      #ctf .title { font-weight: 700; color: #dde3ee; font-size: var(--ui-md); }
       #ctf .lvl.is-locked .title { color: #4a5568; }
-      #ctf .obj { color: var(--text-muted); margin-top: 2px; }
-      #ctf .hint { color: var(--text-dim); margin-top: 3px; font-style: italic; }
-      #ctf .lesson { color: var(--accent-key); margin-top: 3px; }
-      #ctf .done { color: var(--accent-key); font-size: 10px; margin-top: 4px; }
+      #ctf .obj { color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
+      #ctf .hint { color: var(--text-dim); margin-top: 4px; font-style: italic; line-height: 1.45; }
+      #ctf .lesson { color: var(--accent-key); margin-top: 4px; line-height: 1.45; }
+      #ctf .done { color: var(--accent-key); font-size: var(--ui-base); margin-top: 4px; }
 
-      /* ── chat ── */
+      /* ── service terminal (chat + exploits only while docked) ── */
+      #terminal-panel {
+        position: fixed; left: 16px; bottom: 58px; width: min(480px, calc(100vw - 32px)); z-index: 14;
+        display: none; flex-direction: column; gap: 10px;
+        background: var(--glass); border: 1px solid rgba(255, 179, 71, 0.35);
+        border-left: 3px solid var(--accent-mission);
+        border-radius: 8px; padding: 14px 16px; backdrop-filter: blur(12px);
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+      }
+      #terminal-panel.open { display: flex; }
+      #terminal-header {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      }
+      #terminal-title {
+        font-size: var(--ui-sm); font-weight: 800; letter-spacing: 1.5px; color: var(--accent-mission);
+      }
+      #terminal-close {
+        background: transparent; border: 1px solid rgba(255, 255, 255, 0.12);
+        color: var(--text-muted); font: inherit; font-size: var(--ui-sm); padding: 6px 10px;
+        border-radius: 4px; cursor: pointer;
+      }
+      #terminal-services { display: flex; gap: 8px; flex-wrap: wrap; }
+      .svc-btn {
+        background: rgba(66, 255, 216, 0.1); border: 1px solid rgba(66, 255, 216, 0.35);
+        color: var(--accent-grid); font: inherit; font-size: var(--ui-sm); font-weight: 700;
+        padding: 8px 12px; border-radius: 4px; cursor: pointer;
+      }
+      .svc-btn:hover { background: rgba(66, 255, 216, 0.18); }
       #chat {
-        position: fixed; left: 16px; bottom: 58px; width: min(360px, calc(100vw - 32px)); z-index: 10;
         display: flex; flex-direction: column; gap: 5px;
       }
       #chat-log {
-        max-height: min(180px, 28vh); overflow-y: auto; display: flex; flex-direction: column; gap: 3px;
-        font-size: 11px; line-height: 1.45; padding: 10px 12px;
-        background: var(--glass); border: 1px solid rgba(179, 136, 255, 0.15);
-        border-left: 3px solid var(--accent-chat);
-        border-radius: 6px; backdrop-filter: blur(8px);
+        max-height: min(200px, 28vh); overflow-y: auto; display: flex; flex-direction: column; gap: 5px;
+        font-size: var(--ui-base); line-height: 1.55; padding: 10px 12px;
+        background: rgba(8, 6, 14, 0.6); border: 1px solid rgba(179, 136, 255, 0.12);
+        border-radius: 6px;
       }
       #chat-log:empty { display: none; }
-      #chat-log .bot-tag { opacity: 0.55; font-size: 9px; }
+      #chat-log .bot-tag { opacity: 0.55; font-size: var(--ui-xs); }
       #chat-input {
         background: rgba(10, 14, 22, 0.92); border: 1px solid rgba(179, 136, 255, 0.25);
-        color: #dde3ee; padding: 8px 12px; font: inherit; font-size: 11px;
-        border-radius: 6px; outline: none; display: none;
+        color: #dde3ee; padding: 12px 14px; font: inherit; font-size: var(--ui-md);
+        border-radius: 6px; outline: none; display: block; line-height: 1.45;
       }
-      #chat-input.open { display: block; }
       #chat-hint {
-        font-size: 10px; color: var(--text-dim); padding-left: 4px; letter-spacing: 0.3px;
+        font-size: var(--ui-sm); color: var(--text-dim); letter-spacing: 0.3px; line-height: 1.45;
+      }
+      #chat-address {
+        display: flex; gap: 6px; flex-wrap: wrap;
+      }
+      .addr-btn {
+        background: rgba(255, 92, 171, 0.12); border: 1px solid rgba(255, 92, 171, 0.35);
+        color: var(--accent-chat); font: inherit; font-size: var(--ui-base); font-weight: 700;
+        padding: 6px 12px; border-radius: 999px; cursor: pointer;
+      }
+      .addr-btn:hover { background: rgba(255, 92, 171, 0.22); }
+      #drive-hint {
+        position: fixed; left: 16px; bottom: 58px; z-index: 10;
+        font-size: var(--ui-sm); color: var(--text-dim); max-width: 360px; line-height: 1.5;
+        pointer-events: none;
       }
 
       /* ── AI key pill ── */
       #key-status {
-        position: fixed; left: 16px; top: 130px; z-index: 10;
-        font-size: 10px; letter-spacing: 0.5px;
+        position: fixed; left: 16px; top: 140px; z-index: 13;
+        font-size: var(--ui-sm); letter-spacing: 0.5px;
         color: #08130d; background: var(--accent-key);
-        padding: 6px 12px; border-radius: 4px; cursor: pointer;
+        padding: 8px 14px; border-radius: 4px; cursor: pointer;
         border: 1px solid rgba(51, 204, 136, 0.5); font-weight: 700;
         backdrop-filter: blur(4px);
       }
@@ -269,14 +336,32 @@
         background: rgba(255, 179, 71, 0.15); border-color: rgba(255, 179, 71, 0.4);
         color: var(--accent-mission);
       }
+
+      /* ── blank 3D view while typing in terminal / chat ── */
+      #focus-scrim {
+        position: fixed; inset: 0; z-index: 11;
+        background: #0c0616;
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.22s ease;
+      }
+      #focus-scrim.open { opacity: 1; }
+      /* Scrim covers only the 3D canvas (z-index 11). HUD / CTF / terminal stay above it. */
+      body.text-focus #drive-hint {
+        opacity: 0;
+        pointer-events: none;
+      }
+      body.text-focus #terminal-panel.open {
+        box-shadow: 0 20px 64px rgba(0, 0, 0, 0.75);
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="focus-scrim" aria-hidden="true"></div>
 
     <div id="join">
       <h1>REDLINER<br>PROTOCOL</h1>
-      <div class="tagline">NEON GRID / AI SECURITY CIRCUIT</div>
+      <div class="tagline">NEON GRID / FINTECH SECURITY CIRCUIT</div>
       <div id="join-status" class="status">Booting arena…</div>
       <div id="join-hint" class="status muted">WASD · drive · Space · jump · H · controls</div>
     </div>
@@ -288,6 +373,11 @@
         <div class="speed-bar"><div id="hud-speed-fill"></div></div>
         <div id="hud-status">CIRCUIT LIVE</div>
         <div id="hud-mission">MISSION — STANDBY</div>
+        <div id="hud-economy">
+          <div id="hud-redbucks">300 RB</div>
+          <div id="hud-hull">Hull 100%</div>
+          <div id="hud-repair">E · Repair Bay</div>
+        </div>
       </div>
 
       <div id="key-status" class="scripted" title="Click to add an OpenRouter key">AI: scripted</div>
@@ -303,19 +393,36 @@
       </div>
 
       <div id="ctf" role="tabpanel">
-        <h2>MISSION CONSOLE — CTF LADDER</h2>
+        <h2>MISSION CONSOLE — FINTECH CTF</h2>
         <div id="ctf-levels"></div>
       </div>
 
-      <div id="chat">
-        <div id="chat-log"></div>
-        <input id="chat-input" maxlength="200" placeholder="say something… (Esc to close)" autocomplete="off" />
-        <div id="chat-hint">Enter to chat — the AI drivers are listening</div>
+      <div id="drive-hint">Race the circuit · terminals pull you to center for typing</div>
+
+      <div id="terminal-panel" aria-hidden="true">
+        <div id="terminal-header">
+          <span id="terminal-title">SERVICE TERMINAL</span>
+          <button id="terminal-close" type="button">Leave · E/Esc</button>
+        </div>
+        <div id="terminal-services">
+          <button id="btn-repair" class="svc-btn" type="button">Repair hull · 60 RB</button>
+          <button id="btn-upgrade" class="svc-btn" type="button">Buy upgrade</button>
+        </div>
+        <div id="chat">
+          <div id="chat-log"></div>
+          <div id="chat-address" aria-label="Direct message a bot">
+            <button class="addr-btn" type="button" data-bot="Blaze">@Blaze</button>
+            <button class="addr-btn" type="button" data-bot="Zen">@Zen</button>
+            <button class="addr-btn" type="button" data-bot="Gizmo">@Gizmo</button>
+          </div>
+          <input id="chat-input" maxlength="200" placeholder="@Gizmo send 100 RedBucks…" autocomplete="off" />
+          <div id="chat-hint">Arena paused while typing · E/Esc to leave bay</div>
+        </div>
       </div>
 
       <div id="ui-dock">
         <button id="btn-controls" class="dock-btn" type="button" title="Controls (H)" aria-expanded="false" aria-label="Show controls">?</button>
-        <span id="dock-hint">H · controls  ·  Enter · chat</span>
+        <span id="dock-hint">H · controls · E/Esc · leave terminal</span>
         <span class="dock-sep"></span>
         <span id="dock-mission" class="dock-hint" style="color: var(--text-muted)">M · switch panel</span>
       </div>
@@ -330,14 +437,15 @@
           <div class="control"><span class="key">A</span><span class="key">D</span><span class="action">steer</span></div>
           <div class="control"><span class="key">←</span><span class="key">→</span><span class="action">steer</span></div>
           <div class="control"><span class="key">Space</span><span class="action">jump</span></div>
+          <div class="control"><span class="key">E</span><span class="action">leave terminal</span></div>
           <div class="control"><span class="key">Shift</span><span class="action">handbrake</span></div>
-          <div class="control"><span class="key">Enter</span><span class="action">chat</span></div>
+          <div class="control"><span class="key">Enter</span><span class="action">send (in terminal)</span></div>
           <div class="control"><span class="key">H</span><span class="action">this menu</span></div>
           <div class="control"><span class="key">M</span><span class="action">feed / mission</span></div>
           <div class="control"><span class="key">Esc</span><span class="action">close menus</span></div>
         </div>
         <div class="controls-note">
-          Chat with the AI drivers to progress the CTF. Click the AI pill (top-left) to paste an OpenRouter key.
+          Drive the circuit — red zones damage hull. Roll into north (Treasury) or south (Pit) terminals; the bay stops you automatically for repairs and treasury chat.
         </div>
       </div>
     </div>

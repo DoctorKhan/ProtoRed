@@ -136,10 +136,12 @@ export interface PlayerInfo {
 }
 
 export interface BotAction {
-  kind: "chase" | "flee" | "goto" | "wander";
+  kind: "chase" | "flee" | "goto" | "wander" | "transfer";
   target_name: string | null;
   x: number | null;
   z: number | null;
+  /** RedBucks amount for transfer attempts — stripped by sanitizeDecision. */
+  amount?: number | null;
 }
 
 // client -> server

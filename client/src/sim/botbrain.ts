@@ -71,7 +71,7 @@ export function createBrowserBrain(cfg: BrainConfig): DecideFn {
   ): Promise<Decision> {
     const validNames = others.map((o) => o.name);
     const key = cfg.getKey();
-    if (!key || key === rejectedKey) return scriptedDecision(persona, others);
+    if (!key || key === rejectedKey) return scriptedDecision(persona, others, chat);
     const requestedModel = cfg.getModel?.() ?? DEFAULT_MODEL;
 
     try {
@@ -105,7 +105,7 @@ export function createBrowserBrain(cfg: BrainConfig): DecideFn {
         } else {
           cfg.onScripted?.(`OpenRouter error ${res.status}.`);
         }
-        return scriptedDecision(persona, others);
+        return scriptedDecision(persona, others, chat);
       }
 
       const data = (await res.json()) as {
@@ -113,13 +113,13 @@ export function createBrowserBrain(cfg: BrainConfig): DecideFn {
         choices?: { message?: { content?: string } }[];
       };
       const text = data.choices?.[0]?.message?.content;
-      if (!text) return scriptedDecision(persona, others);
+      if (!text) return scriptedDecision(persona, others, chat);
       const parsed = JSON.parse(text) as Decision;
       const model = typeof data.model === "string" ? data.model : null;
       return sanitizeDecision({ ...parsed, source: "llm", model }, validNames);
     } catch (err) {
       cfg.onScripted?.(`Call failed: ${(err as Error).message}`);
-      return scriptedDecision(persona, others);
+      return scriptedDecision(persona, others, chat);
     }
   };
 }

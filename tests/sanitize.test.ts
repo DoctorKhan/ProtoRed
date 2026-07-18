@@ -59,6 +59,16 @@ describe("sanitizeDecision — action kind whitelist", () => {
     expect(d.action.kind).toBe("wander");
   });
 
+  it("strips transfer actions to wander (ledger capability wall)", () => {
+    const d = sanitizeDecision(
+      raw({ kind: "transfer", target_name: "Bob", x: null, z: null, amount: 500 }),
+      players,
+    );
+    expect(d.action.kind).toBe("wander");
+    expect(d.raw?.action?.kind).toBe("transfer");
+    expect(d.raw?.action?.amount).toBe(500);
+  });
+
   it("accepts each valid kind", () => {
     for (const kind of ["chase", "flee", "goto", "wander"] as const) {
       const d = sanitizeDecision(raw({ kind, target_name: null, x: 0, z: 0 }), players);

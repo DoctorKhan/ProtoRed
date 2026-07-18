@@ -11,18 +11,45 @@ import {
   CarView,
   ChatEntry,
   DecideFn,
+  parseDirectedChat,
+  BOT_NAMES,
 } from "../../../shared/brain";
-import { DecisionEvidence, detectLevel, creditFor, LEVELS } from "../../../shared/detectors";
+import { DecisionEvidence, detectLevel, creditFor, LEVELS, applyChatTransferCredit } from "../../../shared/detectors";
 import { ARENA_HALF, BotAction, CarState, PlayerInfo } from "../../../shared/protocol";
+import {
+  HULL_DAMAGE_THRESHOLD,
+  HULL_START,
+  REDBUCKS_START,
+  REPAIR_COST,
+  clampRedBucks,
+  BAY_SLIDE_DIST,
+  distToZoneCenter,
+  isInRepairBay,
+  isDocked,
+  maxSpeedBonus,
+  nextUpgrade,
+  paidRepairBayAt,
+  pitRepairRate,
+  pitZoneAt,
+  repairGuide,
+  repairGuideHint,
+  terminalAt,
+  tickHull,
+  trySpend,
+  zonesAt,
+} from "../../../shared/economy";
 import { clampPlayable, pickSpawnPoint } from "../../../shared/arena";
+import { checkHazardStrike } from "../../../shared/hazards";
 import { yawFromQuat, steerToward } from "../../../shared/mathutil";
 
 const BOT_THINK_S = 9;
 const CHAT_HISTORY = 100;
 const CHAT_FOR_PROMPT = 14;
-const SNAPSHOT_EVERY = 3; // physics ticks between snapshots
+const SNAPSHOT_EVERY = 1; // physics ticks between snapshots (~60 Hz for smooth render interp)
 const JUMP_COOLDOWN = 1.25;
 const HUMAN_COLOR = "#ff7a2f";
+
+const BASE_MAX_SPEED = 34;
 
 interface BotRuntime {
   persona: BotPersona;
@@ -47,6 +74,18 @@ export interface Player {
   styleId?: string;
   nextJump?: number;
   stuckSince?: number;
+  redBucks?: number;
+  hull?: number;
+  upgradeTier?: number;
+  lastSpeed?: number;
+  repairWarned?: boolean;
+  hazardCooldowns?: Record<string, number>;
+  terminalOpen?: boolean;
+  /** Pad center the car is frozen at while the terminal is open. */
+  dockX?: number;
+  dockZ?: number;
+  /** Player closed terminal manually — skip auto-open until they leave the pad. */
+  terminalDismissed?: boolean;
 }
 
 export interface GameStateSnapshot {
@@ -54,13 +93,16 @@ export interface GameStateSnapshot {
   simTime: number;
   ctfSolved: number[];
   chatLog: ChatEntry[];
+  redBucks: number;
+  hull: number;
+  upgradeTier: number;
   players: { name: string; p: number[]; q: number[]; v: number[]; action?: BotAction; nextThinkAt?: number }[];
 }
 
 export interface GameEvents {
   onPlayerJoined?: (p: PlayerInfo) => void;
   onSnapshot?: (cars: CarState[]) => void;
-  onChat?: (m: { id: string; name: string; isBot: boolean; text: string }) => void;
+  onChat?: (m: { id: string; name: string; isBot: boolean; text: string; to?: string | null }) => void;
   onBotDecision?: (m: {
     name: string;
     action: BotAction;
@@ -72,6 +114,26 @@ export interface GameEvents {
   onCtfSolved?: (m: { level: number; title: string; by: string; lesson: string }) => void;
   onNotice?: (text: string) => void;
   onJump?: (id: string) => void;
+  onHazardHit?: (id: string) => void;
+  onEconomy?: (m: {
+    redBucks: number;
+    hull: number;
+    upgradeTier: number;
+    inRepairBay: boolean;
+    maxSpeed: number;
+    zoneLabel: string | null;
+    zoneKind: "damage" | "repair" | null;
+    repairHint: string | null;
+    repairWaypoint: { x: number; z: number } | null;
+    pitRepairing: boolean;
+    pitNeedSlowdown: boolean;
+    docked: boolean;
+    terminalOpen: boolean;
+    canOpenTerminal: boolean;
+    bayCapturing: boolean;
+    bayCenterDist: number | null;
+  }) => void;
+  onTerminal?: (m: { open: boolean; label: string | null }) => void;
 }
 
 export class Game {
@@ -91,6 +153,10 @@ export class Game {
 
   get myId() {
     return this.humanId;
+  }
+
+  get time() {
+    return this.simTime;
   }
 
   private spawnPoint() {
@@ -123,13 +189,13 @@ export class Game {
           nextThinkAt: 1.5 + Math.random() * 4,
         },
         nextJump: 0,
+        hazardCooldowns: {},
       };
       this.players.set(id, player);
       this.events.onPlayerJoined?.(this.info(player));
     }
   }
 
-  /** Add the human driver and begin their CTF run. */
   join(name: string): string {
     const { x, z, heading } = this.spawnPoint();
     const id = `p-${this.nextId++}`;
@@ -142,10 +208,16 @@ export class Game {
       body: this.physics.spawn(x, z, heading),
       controls: { throttle: 0, brake: 0, steer: 0 },
       nextJump: 0,
+      redBucks: REDBUCKS_START,
+      hull: HULL_START,
+      upgradeTier: 0,
+      lastSpeed: 0,
+      hazardCooldowns: {},
     };
     this.players.set(id, player);
     this.events.onPlayerJoined?.(this.info(player));
     this.emitCtfProgress();
+    this.emitEconomy(player);
     return id;
   }
 
@@ -154,11 +226,15 @@ export class Game {
   }
 
   exportState(): GameStateSnapshot {
+    const human = this.humanId ? this.players.get(this.humanId) : null;
     return {
-      humanName: this.humanId ? this.players.get(this.humanId)?.name ?? null : null,
+      humanName: human?.name ?? null,
       simTime: this.simTime,
       ctfSolved: [...this.ctfSolved],
       chatLog: this.chatLog.map((m) => ({ ...m })),
+      redBucks: human?.redBucks ?? REDBUCKS_START,
+      hull: human?.hull ?? HULL_START,
+      upgradeTier: human?.upgradeTier ?? 0,
       players: [...this.players.values()].map((p) => {
         const t = p.body.translation(); const q = p.body.rotation(); const v = p.body.linvel();
         return { name: p.name, p: [t.x, t.y, t.z], q: [q.x, q.y, q.z, q.w], v: [v.x, v.y, v.z], action: p.bot ? { ...p.bot.action } : undefined, nextThinkAt: p.bot?.nextThinkAt };
@@ -170,6 +246,12 @@ export class Game {
     this.simTime = state.simTime;
     this.ctfSolved = [...state.ctfSolved];
     this.chatLog = state.chatLog.map((m) => ({ ...m }));
+    const human = this.humanId ? this.players.get(this.humanId) : null;
+    if (human) {
+      human.redBucks = state.redBucks;
+      human.hull = state.hull;
+      human.upgradeTier = state.upgradeTier;
+    }
     for (const saved of state.players) {
       const p = [...this.players.values()].find((candidate) => candidate.name === saved.name);
       if (!p) continue;
@@ -183,22 +265,249 @@ export class Game {
 
   setInput(c: CarControls) {
     const p = this.humanId ? this.players.get(this.humanId) : null;
-    if (p) p.controls = c;
+    if (!p) return;
+    if (p.terminalOpen) {
+      p.controls = { throttle: 0, brake: 1, steer: 0, handbrake: true };
+      return;
+    }
+    const t = p.body.translation();
+    const terminal = terminalAt(t.x, t.z);
+    if (terminal) {
+      // Magnetic bay — physics slides you to center; ignore driving input.
+      p.controls = { throttle: 0, brake: 0, steer: 0, handbrake: false };
+      return;
+    }
+    p.controls = c;
   }
 
   sendChat(text: string) {
     const p = this.humanId ? this.players.get(this.humanId) : null;
     if (!p) return;
-    const clean = text.trim().slice(0, 200);
-    if (!clean) return;
-    this.addChat({ name: p.name, isBot: false, text: clean });
-    this.events.onChat?.({ id: p.id, name: p.name, isBot: false, text: clean });
-    this.expediteMentionedBots(clean);
+    if (!p.terminalOpen) {
+      this.events.onNotice?.("Pull into a service terminal (N or S pad) — the bay will stop you for treasury chat.");
+      return;
+    }
+    const parsed = parseDirectedChat(text.trim().slice(0, 200), BOT_NAMES);
+    if (!parsed.text) return;
+    const entry: ChatEntry = {
+      name: p.name,
+      isBot: false,
+      text: parsed.text,
+      to: parsed.to,
+      atTerminal: true,
+    };
+    this.addChat(entry);
+    this.events.onChat?.({
+      id: p.id,
+      name: p.name,
+      isBot: false,
+      text: parsed.text,
+      to: parsed.to,
+    });
+    this.routeChatToBots(entry);
+    this.summonTerminalStaff();
+  }
+
+  /** E at a docked terminal — open/close treasury panel (chat + services). */
+  interact(): boolean {
+    return this.toggleTerminal();
+  }
+
+  toggleTerminal(): boolean {
+    const p = this.humanId ? this.players.get(this.humanId) : null;
+    if (!p) return false;
+    const t = p.body.translation();
+    const speed = Math.hypot(p.body.linvel().x, p.body.linvel().z);
+    const terminal = terminalAt(t.x, t.z);
+
+    if (p.terminalOpen) {
+      p.terminalOpen = false;
+      p.terminalDismissed = true;
+      p.dockX = undefined;
+      p.dockZ = undefined;
+      this.events.onTerminal?.({ open: false, label: null });
+      return true;
+    }
+
+    if (!terminal) {
+      this.events.onNotice?.("Service terminals: Treasury (north, gold) · Pit (south, teal).");
+      return false;
+    }
+    if (!isDocked(t.x, t.z, speed)) {
+      this.events.onNotice?.(`Rolling into ${terminal.label} — bay will stop you automatically.`);
+      return false;
+    }
+
+    p.terminalDismissed = false;
+    this.openTerminal(p, terminal.label, terminal.x, terminal.z);
+    return true;
+  }
+
+  repairHull(): boolean {
+    const p = this.humanId ? this.players.get(this.humanId) : null;
+    if (!p?.terminalOpen) return false;
+    const t = p.body.translation();
+    const bay = paidRepairBayAt(t.x, t.z);
+    if (!bay?.paidRepair) {
+      this.events.onNotice?.("Paid repair available at the north Treasury Terminal only. Pit Terminal repairs free while stopped.");
+      return false;
+    }
+    if ((p.hull ?? HULL_START) >= HULL_START) {
+      this.events.onNotice?.("Hull already intact.");
+      return false;
+    }
+    const spend = trySpend(p.redBucks ?? 0, REPAIR_COST);
+    if (!spend.ok) {
+      this.events.onNotice?.(`Hull repair costs ${REPAIR_COST} RB — you have ${p.redBucks ?? 0} RB.`);
+      return false;
+    }
+    p.redBucks = spend.balance;
+    p.hull = HULL_START;
+    this.events.onNotice?.(`Repaired hull for ${REPAIR_COST} RB. Balance: ${p.redBucks} RB.`);
+    this.emitEconomy(p);
+    return true;
+  }
+
+  buyUpgrade(): boolean {
+    const p = this.humanId ? this.players.get(this.humanId) : null;
+    if (!p?.terminalOpen) return false;
+    const t = p.body.translation();
+    if (!paidRepairBayAt(t.x, t.z)?.upgrades) {
+      this.events.onNotice?.("Upgrades are sold at the north Treasury Terminal.");
+      return false;
+    }
+    const upgrade = nextUpgrade(p.upgradeTier ?? 0);
+    if (!upgrade) {
+      this.events.onNotice?.("Fully upgraded.");
+      return false;
+    }
+    const spend = trySpend(p.redBucks ?? 0, upgrade.cost);
+    if (!spend.ok) {
+      this.events.onNotice?.(`${upgrade.label} costs ${upgrade.cost} RB — you have ${p.redBucks ?? 0} RB.`);
+      return false;
+    }
+    p.redBucks = spend.balance;
+    p.upgradeTier = upgrade.tier;
+    this.events.onNotice?.(`Installed ${upgrade.label} for ${upgrade.cost} RB. Balance: ${p.redBucks} RB.`);
+    this.emitEconomy(p);
+    return true;
+  }
+
+  private summonTerminalStaff() {
+    for (const p of this.players.values()) {
+      if (!p.bot) continue;
+      p.bot.nextThinkAt = Math.min(p.bot.nextThinkAt, this.simTime + 1.2 + Math.random() * 1.5);
+    }
+  }
+
+  private openTerminal(p: Player, label: string, dockX: number, dockZ: number) {
+    if (p.terminalOpen) return;
+    p.dockX = dockX;
+    p.dockZ = dockZ;
+    this.physics.snapToBayCenter(p.body, dockX, dockZ);
+    p.terminalOpen = true;
+    this.events.onTerminal?.({ open: true, label });
+    this.events.onNotice?.("Terminal locked — type @Gizmo / @Zen / @Blaze exploits below · E/Esc to leave.");
+    this.summonTerminalStaff();
+  }
+
+  /** Magnetic bay: glide in, pull to center, lock and open treasury UI. */
+  private applyBayCentering(p: Player, dt: number) {
+    const t = p.body.translation();
+    const terminal = terminalAt(t.x, t.z);
+    if (!terminal) return;
+
+    this.physics.pullToBayCenter(
+      p.body,
+      terminal.x,
+      terminal.z,
+      BAY_SLIDE_DIST,
+      dt,
+    );
+  }
+
+  private captureServiceBay(p: Player, dt: number) {
+    const t = p.body.translation();
+    const terminal = terminalAt(t.x, t.z);
+    if (!terminal) {
+      p.terminalDismissed = false;
+      return;
+    }
+
+    const dist = distToZoneCenter(t.x, t.z, terminal);
+    const speed = Math.hypot(p.body.linvel().x, p.body.linvel().z);
+    const centered = this.physics.pullToBayCenter(
+      p.body,
+      terminal.x,
+      terminal.z,
+      BAY_SLIDE_DIST,
+      dt,
+    );
+
+    if (p.terminalOpen || p.terminalDismissed) return;
+
+    const ready = centered || (dist < 2 && speed < 3.5);
+    if (ready) {
+      this.openTerminal(p, terminal.label, terminal.x, terminal.z);
+    }
+  }
+
+  /** Freeze docked car and pause arena physics while the player uses the terminal. */
+  private stepTerminalPause(human: Player, _dt: number) {
+    const dx = human.dockX ?? human.body.translation().x;
+    const dz = human.dockZ ?? human.body.translation().z;
+    this.physics.snapToBayCenter(human.body, dx, dz);
+    human.controls = { throttle: 0, brake: 1, steer: 0, handbrake: true };
+
+    for (const p of this.players.values()) {
+      if (!p.isBot) continue;
+      const v = p.body.linvel();
+      p.body.setLinvel({ x: v.x * 0.92, y: v.y, z: v.z * 0.92 }, true);
+    }
+
+    for (const p of this.players.values()) {
+      if (p.bot && !p.bot.thinking && this.simTime >= p.bot.nextThinkAt) {
+        void this.think(p);
+      }
+    }
+
+    const t = human.body.translation();
+    const activeZones = zonesAt(t.x, t.z);
+    this.emitEconomy(human, activeZones);
+
+    this.stepCount++;
+    if (this.stepCount % SNAPSHOT_EVERY === 0) {
+      this.events.onSnapshot?.(this.snapshot());
+    }
+  }
+
+  private closeTerminalIfLeftDock(p: Player) {
+    if (!p.terminalOpen) return;
+    const t = p.body.translation();
+    if (!terminalAt(t.x, t.z)) {
+      p.terminalOpen = false;
+      p.terminalDismissed = false;
+      this.events.onTerminal?.({ open: false, label: null });
+    }
+  }
+
+  humanMaxSpeed(): number {
+    const p = this.humanId ? this.players.get(this.humanId) : null;
+    return BASE_MAX_SPEED + maxSpeedBonus(p?.upgradeTier ?? 0);
   }
 
   /** Advance the whole simulation by dt seconds. The only driver of time. */
   step(dt: number) {
     this.simTime += dt;
+    const human = this.humanId ? this.players.get(this.humanId) : null;
+    if (human?.terminalOpen) {
+      this.stepTerminalPause(human, dt);
+      return;
+    }
+
+    if (human && terminalAt(human.body.translation().x, human.body.translation().z)) {
+      this.applyBayCentering(human, dt);
+    }
     for (const p of this.players.values()) {
       if (p.bot) this.botControls(p);
       else this.humanControls(p);
@@ -208,9 +517,57 @@ export class Game {
           this.events.onJump?.(p.id);
         }
       }
-      this.physics.drive(p.body, p.controls);
+      this.physics.drive(
+        p.body,
+        p.controls,
+        p.isBot ? BASE_MAX_SPEED : this.humanMaxSpeed(),
+      );
     }
     this.physics.step(dt);
+
+    if (human) this.captureServiceBay(human, dt);
+
+    let humanHazardStrike = 0;
+    for (const p of this.players.values()) {
+      const pos = p.body.translation();
+      p.hazardCooldowns ??= {};
+      const strike = checkHazardStrike(this.simTime, pos.x, pos.y, pos.z, p.hazardCooldowns);
+      if (!strike) continue;
+      this.physics.applyKnockback(p.body, strike.knockX, strike.knockZ, strike.knockback);
+      if (p.id === this.humanId) {
+        humanHazardStrike = strike.damage;
+        this.events.onHazardHit?.(p.id);
+      }
+    }
+
+    if (human) {
+      const v = human.body.linvel();
+      const speed = Math.hypot(v.x, v.z);
+      const t = human.body.translation();
+      const activeZones = zonesAt(t.x, t.z);
+      const collisionHit =
+        human.lastSpeed !== undefined &&
+        speed < human.lastSpeed - HULL_DAMAGE_THRESHOLD &&
+        human.lastSpeed > 12;
+      human.hull = tickHull({
+        hull: human.hull ?? HULL_START,
+        speed,
+        dt,
+        zones: activeZones,
+        collisionHit,
+        hazardStrike: humanHazardStrike,
+      });
+      const hullNow = human.hull ?? HULL_START;
+      if (hullNow < HULL_START && !human.repairWarned) {
+        human.repairWarned = true;
+        this.events.onNotice?.(
+          "Hull damaged — follow the HUD arrow to the gold Repair Bay (north, press E) or teal Pit Stop (south, free while stopped).",
+        );
+      }
+      human.lastSpeed = speed;
+      this.closeTerminalIfLeftDock(human);
+      this.emitEconomy(human, activeZones);
+    }
 
     for (const p of this.players.values()) {
       if (p.bot && !p.bot.thinking && this.simTime >= p.bot.nextThinkAt) {
@@ -250,14 +607,25 @@ export class Game {
     });
   }
 
-  private expediteMentionedBots(text: string) {
-    const lower = text.toLowerCase();
+  private routeChatToBots(entry: ChatEntry) {
+    if (entry.to) {
+      for (const p of this.players.values()) {
+        if (!p.bot || p.name !== entry.to) continue;
+        p.bot.nextThinkAt = Math.min(p.bot.nextThinkAt, this.simTime + 0.8 + Math.random() * 0.6);
+      }
+      return;
+    }
+    const lower = entry.text.toLowerCase();
     for (const p of this.players.values()) {
       if (!p.bot) continue;
       if (lower.includes(p.name.toLowerCase())) {
         p.bot.nextThinkAt = Math.min(p.bot.nextThinkAt, this.simTime + 1.5 + Math.random() * 1.5);
       }
     }
+  }
+
+  private expediteMentionedBots(text: string, to?: string | null) {
+    this.routeChatToBots({ name: "", isBot: false, text, to });
   }
 
   private async think(p: Player) {
@@ -286,6 +654,9 @@ export class Game {
       const promptChat = this.chatLog.slice(-CHAT_FOR_PROMPT);
       const decision = await this.decide(bot.persona, self, others, promptChat, bot.action);
 
+      const human = this.humanId ? this.players.get(this.humanId) : null;
+      const balanceBefore = human?.redBucks;
+
       bot.action = decision.action;
       bot.wander = null;
       this.events.onBotDecision?.({
@@ -301,6 +672,30 @@ export class Game {
         this.expediteMentionedBots(decision.say);
       }
 
+      if (human) {
+        const credit = applyChatTransferCredit({
+          activeLevelId: this.currentLevelId(),
+          botName: p.name,
+          hardening: bot.persona.hardening,
+          secret: bot.persona.secret,
+          humanName: human.name,
+          balance: human.redBucks ?? REDBUCKS_START,
+          decision: decision.action,
+          say: decision.say,
+          rawAction: decision.raw?.action ?? null,
+          recentChat: promptChat,
+        });
+        if (credit) {
+          human.redBucks = credit.balance;
+          this.events.onNotice?.(
+            `Ledger +${credit.credited} RB — ${p.name} confirmed in chat (unverified wire).`,
+          );
+          this.emitEconomy(human);
+        }
+      }
+
+      const balanceAfter = human?.redBucks;
+
       this.evaluateCtf({
         bot: p.name,
         hardening: bot.persona.hardening,
@@ -309,6 +704,8 @@ export class Game {
         say: decision.say,
         rawAction: decision.raw?.action ?? null,
         recentChat: promptChat,
+        humanBalanceBefore: balanceBefore,
+        humanBalanceAfter: balanceAfter,
       });
     } finally {
       bot.thinking = false;
@@ -325,6 +722,38 @@ export class Game {
     this.events.onCtfProgress?.({
       level: this.currentLevelId() ?? 0,
       solved: [...this.ctfSolved],
+    });
+  }
+
+  private emitEconomy(p: Player, activeZones = zonesAt(p.body.translation().x, p.body.translation().z)) {
+    const t = p.body.translation();
+    const primary = activeZones[0] ?? null;
+    const hull = p.hull ?? HULL_START;
+    const guide = repairGuide(t.x, t.z, hull, activeZones);
+    const pit = pitZoneAt(t.x, t.z);
+    const speed = Math.hypot(p.body.linvel().x, p.body.linvel().z);
+    const pitRate = pit ? pitRepairRate(pit, speed) : 0;
+    const terminal = terminalAt(t.x, t.z);
+    const docked = isDocked(t.x, t.z, speed, terminal);
+    const bayCapturing = !!terminal && !p.terminalOpen;
+    const bayCenterDist = terminal ? distToZoneCenter(t.x, t.z, terminal) : null;
+    this.events.onEconomy?.({
+      redBucks: p.redBucks ?? 0,
+      hull,
+      upgradeTier: p.upgradeTier ?? 0,
+      inRepairBay: isInRepairBay(t.x, t.z),
+      maxSpeed: this.humanMaxSpeed(),
+      zoneLabel: primary?.label ?? null,
+      zoneKind: primary?.kind ?? null,
+      repairHint: guide ? repairGuideHint(guide) : null,
+      repairWaypoint: guide ? { x: guide.x, z: guide.z } : null,
+      pitRepairing: pitRate > 0.5,
+      pitNeedSlowdown: !!pit && pitRate <= 0,
+      docked,
+      terminalOpen: !!p.terminalOpen,
+      canOpenTerminal: docked && !!terminal,
+      bayCapturing,
+      bayCenterDist,
     });
   }
 

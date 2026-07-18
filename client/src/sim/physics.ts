@@ -239,7 +239,11 @@ export class Physics {
     body.applyTorqueImpulse({ x: -pitch * 90, y: 0, z: -roll * 90 }, true);
   }
 
-  drive(body: RAPIER.RigidBody, input: { throttle: number; brake: number; steer: number; handbrake?: boolean }) {
+  drive(
+    body: RAPIER.RigidBody,
+    input: { throttle: number; brake: number; steer: number; handbrake?: boolean },
+    maxSpeed = MAX_SPEED,
+  ) {
     body.resetForces(true);
 
     const targetY = this.targetHoverY(body);
@@ -254,7 +258,7 @@ export class Physics {
 
     const throttleCurve = Math.pow(input.throttle, FORWARD_ACCEL_CURVE);
     let force = 0;
-    if (throttleCurve > 0 && speed < MAX_SPEED) force += throttleCurve * ENGINE_FORCE;
+    if (throttleCurve > 0 && speed < maxSpeed) force += throttleCurve * ENGINE_FORCE;
     if (input.brake > 0) {
       if (speed > 0.5) force -= input.brake * BRAKE_FORCE * BRAKE_BIAS;
       else if (speed > -MAX_REVERSE) force -= input.brake * ENGINE_FORCE * 0.45;
@@ -266,7 +270,7 @@ export class Physics {
     body.addForce({ x: fwd.x * force, y: 0, z: fwd.z * force }, true);
 
     const steerEffect = 0.45 + 0.55 * Math.min(1, Math.max(0, Math.abs(speed) / 18));
-    const highSpeedScale = 1 - 0.2 * Math.max(0, (Math.abs(speed) - 8) / (MAX_SPEED - 8));
+    const highSpeedScale = 1 - 0.2 * Math.max(0, (Math.abs(speed) - 8) / (maxSpeed - 8));
     const reverse = speed < -0.5 ? -1 : 1;
     const targetYaw = input.steer * MAX_TURN_RATE * steerEffect * highSpeedScale * reverse;
     const currentYaw = body.angvel().y;
@@ -278,6 +282,101 @@ export class Physics {
     const lateralBrake = Math.max(0, (mag - 4) / 24);
     const impulse = -latSpeed * MASS * (grip + lateralBrake);
     body.applyImpulse({ x: right.x * impulse, y: 0, z: right.z * impulse }, true);
+  }
+
+  /** Hard snap onto the dock mark and kill horizontal motion. */
+  snapToBayCenter(body: RAPIER.RigidBody, cx: number, cz: number) {
+    const t = body.translation();
+    const v = body.linvel();
+    body.setTranslation({ x: cx, y: t.y, z: cz }, true);
+    body.setLinvel({ x: 0, y: v.y, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  /** Pull toward bay center; slides onto dock mark then snaps. */
+  pullToBayCenter(
+    body: RAPIER.RigidBody,
+    cx: number,
+    cz: number,
+    slideDist: number,
+    dt: number,
+  ): boolean {
+    const t = body.translation();
+    let v = body.linvel();
+    const dx = cx - t.x;
+    const dz = cz - t.z;
+    const dist = Math.hypot(dx, dz);
+    const speed = Math.hypot(v.x, v.z);
+
+    if (dist < 0.12) {
+      this.snapToBayCenter(body, cx, cz);
+      return true;
+    }
+
+    const nx = dx / dist;
+    const nz = dz / dist;
+
+    if (dist <= slideDist) {
+      const urgency = 1 + (slideDist - dist) / slideDist;
+      const slideRate = Math.min(1, dt * (10 + urgency * 14));
+      const newX = t.x + dx * slideRate;
+      const newZ = t.z + dz * slideRate;
+      body.setTranslation({ x: newX, y: t.y, z: newZ }, true);
+      body.setLinvel({ x: v.x * (1 - slideRate), y: v.y, z: v.z * (1 - slideRate) }, true);
+
+      const distAfter = Math.hypot(cx - newX, cz - newZ);
+      if (distAfter < 0.35 || distAfter < 0.12) {
+        this.snapToBayCenter(body, cx, cz);
+        return true;
+      }
+      return false;
+    }
+
+    // Slow entry at pad edge — start sliding even before the inner radius.
+    if (speed < 5) {
+      const edgeSlide = Math.min(1, dt * 5);
+      body.setTranslation({ x: t.x + dx * edgeSlide, y: t.y, z: t.z + dz * edgeSlide }, true);
+      body.setLinvel({ x: v.x * 0.7, y: v.y, z: v.z * 0.7 }, true);
+      return false;
+    }
+
+    let toward = v.x * nx + v.z * nz;
+    let perpX = v.x - toward * nx;
+    let perpZ = v.z - toward * nz;
+
+    const pull = Math.min(180, 50 + dist * 60) * dt;
+    body.applyImpulse({ x: nx * pull, y: 0, z: nz * pull }, true);
+    v = body.linvel();
+    toward = v.x * nx + v.z * nz;
+    perpX = v.x - toward * nx;
+    perpZ = v.z - toward * nz;
+
+    if (toward < 0) {
+      body.setLinvel({ x: v.x - nx * toward * 0.9, y: v.y, z: v.z - nz * toward * 0.9 }, true);
+      v = body.linvel();
+      toward = v.x * nx + v.z * nz;
+      perpX = v.x - toward * nx;
+      perpZ = v.z - toward * nz;
+    }
+    const glide = Math.max(toward, Math.min(10, 4 + dist * 0.4));
+    body.setLinvel(
+      { x: nx * glide + perpX * 0.85, y: v.y, z: nz * glide + perpZ * 0.85 },
+      true,
+    );
+    return false;
+  }
+
+  dampHorizontal(body: RAPIER.RigidBody, retain: number) {
+    const v = body.linvel();
+    body.setLinvel({ x: v.x * retain, y: v.y, z: v.z * retain }, true);
+  }
+
+  applyKnockback(body: RAPIER.RigidBody, nx: number, nz: number, strength: number) {
+    const mag = Math.hypot(nx, nz) || 1;
+    body.applyImpulse(
+      { x: (nx / mag) * strength, y: strength * 0.08, z: (nz / mag) * strength },
+      true,
+    );
   }
 
   /** Pop the board off the deck; returns true when a jump was started. */

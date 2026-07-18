@@ -1,8 +1,10 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { ARENA_HALF, CarState, OBSTACLES, PLATFORMS, RAMPS, PlayerInfo } from "../../shared/protocol";
+import { ARENA_ZONES } from "../../shared/economy";
+import { ARENA_HAZARDS, ArenaHazard, hazardAngle } from "../../shared/hazards";
 import { HOVER_HEIGHT } from "./sim/physics";
-import { yawFromQuat } from "../../shared/mathutil";
+import { yawFromQuat, deltaYaw } from "../../shared/mathutil";
 
 interface TrailPoint {
   x: number;
@@ -18,12 +20,16 @@ interface CarView {
   railR: THREE.Mesh;
   hoverRing: THREE.Mesh;
   deckStrip: THREE.Mesh;
-  heroOutline: THREE.LineSegments | null;
+  heroAura: THREE.Group | null;
   trailLine: THREE.Line;
   trailPoints: TrailPoint[];
   lastTrailX: number;
   lastTrailZ: number;
   lastYaw: number;
+  smoothYaw: number;
+  displayX: number;
+  displayY: number;
+  displayZ: number;
   lastSpeed: number;
   isPlayer: boolean;
 }
@@ -511,12 +517,38 @@ function buildHoverboard(bank: THREE.Group, player: PlayerInfo) {
 
   bank.add(makeLabel(player.name + (player.isBot ? " ✦" : ""), player.color));
 
-  // A wireframe volume around the player intersects the board from the
-  // chase-camera angle and reads as tangled artifacts, so use the board glow
-  // itself as the player highlight.
-  const heroOutline: THREE.LineSegments | null = null;
+  let heroAura: THREE.Group | null = null;
+  if (hero) {
+    const auraGeo = new THREE.IcosahedronGeometry(2.25, 2);
+    heroAura = new THREE.Group();
+    heroAura.position.y = 0.14;
 
-  return { railL, railR, hoverRing, deckStrip, plasma, plasmaCore, heroOutline, isPlayer: hero };
+    const veil = new THREE.Mesh(
+      auraGeo,
+      new THREE.MeshBasicMaterial({
+        color: glow,
+        transparent: true,
+        opacity: 0.035,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.BackSide,
+      }),
+    );
+    veil.renderOrder = 997;
+
+    const edges = wireframeShell(auraGeo, glow, 0.12);
+    edges.renderOrder = 998;
+    const edgeMat = edges.material as THREE.LineBasicMaterial;
+    edgeMat.depthTest = false;
+    edgeMat.transparent = true;
+    edgeMat.opacity = 0.14;
+    edgeMat.blending = THREE.AdditiveBlending;
+
+    heroAura.add(veil, edges);
+    bank.add(heroAura);
+  }
+
+  return { railL, railR, hoverRing, deckStrip, plasma, plasmaCore, heroAura, isPlayer: hero };
 }
 
 function buildCrystalObstacle(w: number, h: number, d: number): THREE.Group {
@@ -564,6 +596,95 @@ function makeTrailLine(color: number): THREE.Line {
   );
 }
 
+function buildArenaHazard(h: ArenaHazard): THREE.Group {
+  const pivotY = (h.yLow + h.yHigh) / 2;
+  const group = new THREE.Group();
+  group.position.set(h.x, pivotY, h.z);
+
+  const hazardRed = 0xff3344;
+  const hazardCore = 0xff8866;
+  const armMat = new THREE.MeshStandardMaterial({
+    color: hazardRed,
+    emissive: hazardRed,
+    emissiveIntensity: 1.4,
+    metalness: 0.35,
+    roughness: 0.4,
+  });
+  const tipMat = new THREE.MeshBasicMaterial({
+    color: hazardCore,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const pivot = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.75, h.yHigh - h.yLow, 10),
+    new THREE.MeshStandardMaterial({
+      color: TIDE_DIM,
+      emissive: hazardRed,
+      emissiveIntensity: 0.55,
+      metalness: 0.5,
+      roughness: 0.55,
+    }),
+  );
+  group.add(pivot);
+
+  const armGroup = new THREE.Group();
+  const count = h.armCount ?? 1;
+  for (let i = 0; i < count; i++) {
+    const arm = new THREE.Group();
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(h.armLength, 0.32, h.armHalfWidth * 2),
+      armMat,
+    );
+    beam.position.x = h.armLength / 2;
+    arm.add(beam);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 10), tipMat);
+    tip.position.set(h.armLength - 0.2, 0, 0);
+    arm.add(tip);
+    arm.rotation.y = (i * Math.PI) / Math.max(1, count === 2 ? 2 : count);
+    armGroup.add(arm);
+  }
+  group.add(armGroup);
+
+  const floorY = h.yLow - pivotY - 0.02;
+  const warn = new THREE.Mesh(
+    new THREE.RingGeometry(1.4, 2.2, 24),
+    new THREE.MeshBasicMaterial({
+      color: hazardRed,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  warn.rotation.x = -Math.PI / 2;
+  warn.position.y = floorY;
+  group.add(warn);
+
+  const sweep = new THREE.Mesh(
+    new THREE.RingGeometry(h.armLength - 0.6, h.armLength + 0.15, 48),
+    new THREE.MeshBasicMaterial({
+      color: hazardRed,
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  sweep.rotation.x = -Math.PI / 2;
+  sweep.position.y = floorY + 0.02;
+  group.add(sweep);
+
+  group.userData.hazard = h;
+  group.userData.armGroup = armGroup;
+  group.userData.warn = warn;
+  group.userData.sweep = sweep;
+  return group;
+}
+
 export interface HudState {
   speed: number;
   maxSpeed: number;
@@ -581,10 +702,16 @@ export class Renderer {
   private tmpCamFocus = new THREE.Vector3();
   private tmpCamDir = new THREE.Vector3();
   private lookTarget = new THREE.Vector3();
+  private smoothCamPull = CAM_DIST_MIN;
   private cameraInitialized = false;
   private playerSteer = 0;
   private playerSpeed = 0;
   private playerYawRate = 0;
+  private lastFrameMs = performance.now();
+  private hudMaxSpeed = MAX_SPEED;
+  private repairMarker = new THREE.Group();
+  private hazardMeshes: THREE.Group[] = [];
+  private simTime = 0;
   myId: string | null = null;
 
   constructor(container: HTMLElement) {
@@ -609,6 +736,9 @@ export class Renderer {
 
     const trackStatic = (obj: THREE.Object3D) => {
       this.scene.add(obj);
+    };
+    const trackCameraBlocker = (obj: THREE.Object3D) => {
+      this.scene.add(obj);
       this.cameraBlockers.push(obj);
     };
 
@@ -629,6 +759,7 @@ export class Renderer {
     trackStatic(ground);
     this.scene.add(makeAuroraBackdrop());
     this.scene.add(makeFloatingMotes());
+    this.scene.add(makeFloatingMotes());
 
     const mkWall = (x: number, z: number, w: number, d: number) => {
       const geo = new THREE.BoxGeometry(w, 4, d);
@@ -636,7 +767,7 @@ export class Renderer {
       shell.add(new THREE.Mesh(geo, structureMaterial(TIDE_VIOLET)));
       addFaceDecal(shell, w, 4, d, TIDE_GOLD);
       shell.position.set(x, 2, z);
-      trackStatic(shell);
+      trackCameraBlocker(shell);
     };
     mkWall(0, -ARENA_HALF - 1, ARENA_HALF * 2 + 4, 2);
     mkWall(0, ARENA_HALF + 1, ARENA_HALF * 2 + 4, 2);
@@ -646,7 +777,7 @@ export class Renderer {
     for (const o of OBSTACLES) {
       const obs = buildCrystalObstacle(o.w, o.h, o.d);
       obs.position.set(o.x, o.h / 2, o.z);
-      trackStatic(obs);
+      trackCameraBlocker(obs);
     }
 
     const padMat = structureMaterial(TIDE_TEAL);
@@ -704,6 +835,100 @@ export class Renderer {
       trackStatic(rampGroup);
     }
 
+    for (const zone of ARENA_ZONES) {
+      const zR = zone.radius;
+      const group = new THREE.Group();
+      const isDamage = zone.kind === "damage";
+      const accent = isDamage ? 0xff4422 : zone.paidRepair ? TIDE_GOLD : TIDE_TEAL;
+      const pad = new THREE.Mesh(
+        new THREE.CylinderGeometry(zR * 0.92, zR, 0.1, 32),
+        surfaceMaterial("coral", 3.2, 3.2, accent, isDamage ? 0.42 : 0.5),
+      );
+      pad.position.y = 0.06;
+      group.add(pad);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(zR * 0.7, zR * 0.94, 32),
+        new THREE.MeshBasicMaterial({
+          color: accent,
+          transparent: true,
+          opacity: isDamage ? 0.35 : 0.45,
+          side: THREE.DoubleSide,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.13;
+      group.add(ring);
+      if (!isDamage) {
+        const beacon = new THREE.PointLight(accent, 0.9, zR * 2, 2);
+        beacon.position.y = 2.2;
+        group.add(beacon);
+        const labelColor = zone.paidRepair ? "#ffcc55" : "#55eedd";
+        const labelText = zone.paidRepair ? "Repair Bay · E" : "Pit Stop · free";
+        const label = makeLabel(labelText, labelColor);
+        label.position.set(0, 4.5, 0);
+        label.scale.multiplyScalar(1.1);
+        group.add(label);
+        const column = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.1, 0.28, 10, 8, 1, true),
+          new THREE.MeshBasicMaterial({
+            color: accent,
+            transparent: true,
+            opacity: 0.28,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          }),
+        );
+        column.position.y = 5;
+        group.add(column);
+      } else {
+        const warn = makeLabel(`⚠ ${zone.label}`, "#ff6644");
+        warn.position.set(0, 3.8, 0);
+        warn.scale.multiplyScalar(0.95);
+        group.add(warn);
+      }
+      group.position.set(zone.x, 0, zone.z);
+      trackStatic(group);
+    }
+
+    for (const h of ARENA_HAZARDS) {
+      const hazard = buildArenaHazard(h);
+      trackStatic(hazard);
+      this.hazardMeshes.push(hazard);
+    }
+
+    const markerBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.45, 22, 10, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: TIDE_GOLD,
+        transparent: true,
+        opacity: 0.38,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    markerBeam.position.y = 11;
+    markerBeam.name = "repair-beam";
+    this.repairMarker.add(markerBeam);
+    const markerRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.2, 2.4, 32),
+      new THREE.MeshBasicMaterial({
+        color: TIDE_GOLD,
+        transparent: true,
+        opacity: 0.5,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    markerRing.rotation.x = -Math.PI / 2;
+    markerRing.position.y = 0.14;
+    markerRing.name = "repair-ring";
+    this.repairMarker.add(markerRing);
+    this.repairMarker.visible = false;
+    this.scene.add(this.repairMarker);
+
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
@@ -715,8 +940,22 @@ export class Renderer {
     this.playerSteer = steer;
   }
 
+  setSimTime(t: number) {
+    this.simTime = t;
+  }
+
+  setHudMaxSpeed(maxSpeed: number) {
+    this.hudMaxSpeed = maxSpeed;
+  }
+
+  /** Highlight the nearest repair pad when hull is damaged. */
+  setRepairWaypoint(waypoint: { x: number; z: number } | null) {
+    this.repairMarker.visible = waypoint !== null;
+    if (waypoint) this.repairMarker.position.set(waypoint.x, 0, waypoint.z);
+  }
+
   getHudState(): HudState {
-    return { speed: this.playerSpeed, maxSpeed: MAX_SPEED };
+    return { speed: this.playerSpeed, maxSpeed: this.hudMaxSpeed };
   }
 
   addCar(player: PlayerInfo) {
@@ -740,12 +979,16 @@ export class Renderer {
       railR: parts.railR,
       hoverRing: parts.hoverRing,
       deckStrip: parts.deckStrip,
-      heroOutline: parts.heroOutline,
+      heroAura: parts.heroAura,
       trailLine,
       trailPoints: [],
       lastTrailX: NaN,
       lastTrailZ: NaN,
       lastYaw: 0,
+      smoothYaw: NaN,
+      displayX: NaN,
+      displayY: NaN,
+      displayZ: NaN,
       lastSpeed: 0,
       isPlayer: parts.isPlayer,
     });
@@ -799,8 +1042,8 @@ export class Renderer {
     mat.opacity = THREE.MathUtils.lerp(0.45, 0.92, Math.min(1, speed / MAX_SPEED));
   }
 
-  /** Pull the chase cam forward when walls/platforms would hide the board. */
-  private resolveCameraPosition(focus: THREE.Vector3, desired: THREE.Vector3): THREE.Vector3 {
+  /** Pull the chase cam forward when tall walls would hide the board. */
+  private resolveCameraPosition(focus: THREE.Vector3, desired: THREE.Vector3, frameDt: number): THREE.Vector3 {
     this.tmpCamDir.copy(desired).sub(focus);
     const dist = this.tmpCamDir.length();
     if (dist < 0.01) return desired;
@@ -809,11 +1052,12 @@ export class Renderer {
     this.cameraRay.far = dist;
     const hits = this.cameraRay.intersectObjects(this.cameraBlockers, true);
     const hit = hits.find((h) => (h.object as THREE.Mesh).isMesh);
+    let targetPull = dist;
     if (hit && hit.distance < dist - 0.6) {
-      const pullDist = Math.max(2.2, hit.distance - 0.6);
-      return focus.clone().add(this.tmpCamDir.clone().multiplyScalar(pullDist));
+      targetPull = Math.max(2.2, hit.distance - 0.6);
     }
-    return desired;
+    this.smoothCamPull += (targetPull - this.smoothCamPull) * Math.min(1, frameDt * 4);
+    return focus.clone().add(this.tmpCamDir.clone().multiplyScalar(this.smoothCamPull));
   }
 
   private tmpQa = new THREE.Quaternion();
@@ -821,8 +1065,21 @@ export class Renderer {
   private tmpYawQ = new THREE.Quaternion();
 
   render() {
-    const renderTime = performance.now() - INTERP_DELAY_MS;
-    const dt = 1 / 60;
+    const nowMs = performance.now();
+    const frameDt = Math.min(0.05, Math.max(1 / 240, (nowMs - this.lastFrameMs) / 1000));
+    this.lastFrameMs = nowMs;
+    const renderTime = nowMs - INTERP_DELAY_MS;
+    const pulse = 0.5 + Math.sin(this.simTime * 4.2) * 0.22;
+
+    for (const hg of this.hazardMeshes) {
+      const h = hg.userData.hazard as ArenaHazard;
+      const armGroup = hg.userData.armGroup as THREE.Group;
+      armGroup.rotation.y = hazardAngle(h, this.simTime);
+      const warn = hg.userData.warn as THREE.Mesh;
+      const sweep = hg.userData.sweep as THREE.Mesh;
+      (warn.material as THREE.MeshBasicMaterial).opacity = 0.28 + pulse * 0.28;
+      (sweep.material as THREE.MeshBasicMaterial).opacity = 0.08 + pulse * 0.1;
+    }
 
     let a: Snapshot | null = null;
     let b: Snapshot | null = null;
@@ -879,34 +1136,49 @@ export class Renderer {
           qw = this.tmpQa.w;
         }
 
-        const yaw = yawFromQuat({ x: qx, y: qy, z: qz, w: qw });
-        yawQuat(yaw, this.tmpYawQ);
+        const rawYaw = yawFromQuat({ x: qx, y: qy, z: qz, w: qw });
+        if (!Number.isFinite(view.smoothYaw)) view.smoothYaw = rawYaw;
+        else view.smoothYaw += deltaYaw(view.smoothYaw, rawYaw) * Math.min(1, frameDt * 14);
+
         const grounded = cb?.grounded ?? ca.grounded ?? py < HOVER_HEIGHT + 0.18;
         const visualY = py - VISUAL_Y_OFFSET;
-        view.root.position.set(px, visualY, pz);
+        const posBlend = Math.min(1, frameDt * (view.isPlayer ? 10 : 14));
+        if (!Number.isFinite(view.displayX)) view.displayX = px;
+        else view.displayX += (px - view.displayX) * posBlend;
+        if (!Number.isFinite(view.displayY)) view.displayY = visualY;
+        else view.displayY += (visualY - view.displayY) * posBlend;
+        if (!Number.isFinite(view.displayZ)) view.displayZ = pz;
+        else view.displayZ += (pz - view.displayZ) * posBlend;
+
+        yawQuat(view.smoothYaw, this.tmpYawQ);
+        view.root.position.set(view.displayX, view.displayY, view.displayZ);
         view.root.quaternion.copy(this.tmpYawQ);
 
-        const yawRate = (yaw - view.lastYaw) / dt;
+        const yawStep = deltaYaw(view.lastYaw, view.smoothYaw);
+        const yawRate = yawStep / frameDt;
         const accel = speed - view.lastSpeed;
         const vy = cb ? (cb.p[1] - ca.p[1]) / (b!.recvTime - a.recvTime || 1) : 0;
-        view.lastYaw = yaw;
+        view.lastYaw = view.smoothYaw;
         view.lastSpeed = speed;
 
-        const bankFromSteer = id === this.myId ? this.playerSteer * 0.28 : 0;
-        const bankFromTurn = THREE.MathUtils.clamp(-yawRate * 0.14, -0.32, 0.32);
+        const bankFromSteer = id === this.myId ? this.playerSteer * 0.22 : 0;
+        const bankFromTurn = THREE.MathUtils.clamp(-yawRate * 0.08, -0.22, 0.22);
         view.bank.rotation.z = THREE.MathUtils.lerp(
           view.bank.rotation.z,
           bankFromSteer + bankFromTurn,
-          0.14,
+          Math.min(1, frameDt * 10),
         );
         const pitch = grounded ? 0 : THREE.MathUtils.clamp(-vy * 0.04, -0.22, 0.18);
-        view.bank.rotation.x = THREE.MathUtils.lerp(view.bank.rotation.x, pitch, 0.12);
+        view.bank.rotation.x = THREE.MathUtils.lerp(
+          view.bank.rotation.x,
+          pitch,
+          Math.min(1, frameDt * 8),
+        );
 
         const boosting = grounded && speed > 8 && accel > 0.08;
         const jumping = !grounded && vy > 0.5;
         const cruiseGlow = grounded ? 0.55 + Math.min(1, speed / MAX_SPEED) * 0.55 : 0.35;
         const t = performance.now() * 0.001;
-        const pulse = 1 + Math.sin(t * (view.isPlayer ? 5 : 4)) * 0.06;
 
         view.plasma.visible = boosting || jumping;
         view.plasmaCore.visible = boosting || jumping;
@@ -914,11 +1186,11 @@ export class Renderer {
           const thrust = 0.8 + Math.min(1, speed / MAX_SPEED) * 0.65;
           view.plasma.scale.set(thrust, 0.55 + accel * 0.45, thrust);
           view.plasmaCore.scale.setScalar(0.9 + accel * 0.35);
-          const railBoost = (view.isPlayer ? 2.2 : 1.6) * pulse;
+          const railBoost = view.isPlayer ? 2.2 : 1.6;
           (view.railL.material as THREE.MeshStandardMaterial).emissiveIntensity = railBoost;
           (view.railR.material as THREE.MeshStandardMaterial).emissiveIntensity = railBoost;
           (view.deckStrip.material as THREE.MeshStandardMaterial).emissiveIntensity =
-            (view.isPlayer ? 1.1 : 0.75) * pulse;
+            view.isPlayer ? 1.1 : 0.75;
         } else if (jumping) {
           view.plasma.scale.set(1.15, 1.35, 1.15);
           view.plasmaCore.scale.set(1.4, 1.4, 1.4);
@@ -926,8 +1198,8 @@ export class Renderer {
           (view.railL.material as THREE.MeshStandardMaterial).emissiveIntensity = jumpGlow;
           (view.railR.material as THREE.MeshStandardMaterial).emissiveIntensity = jumpGlow;
         } else {
-          view.bank.rotation.x = THREE.MathUtils.lerp(view.bank.rotation.x, 0, 0.1);
-          const idleRail = (view.isPlayer ? 1.35 : 1.0) * cruiseGlow * pulse;
+          view.bank.rotation.x = THREE.MathUtils.lerp(view.bank.rotation.x, 0, Math.min(1, frameDt * 7));
+          const idleRail = (view.isPlayer ? 1.35 : 1.0) * cruiseGlow;
           (view.railL.material as THREE.MeshStandardMaterial).emissiveIntensity = idleRail;
           (view.railR.material as THREE.MeshStandardMaterial).emissiveIntensity = idleRail;
           (view.deckStrip.material as THREE.MeshStandardMaterial).emissiveIntensity =
@@ -936,10 +1208,9 @@ export class Renderer {
 
         if (grounded) {
           const ringMat = view.hoverRing.material as THREE.MeshBasicMaterial;
-          ringMat.opacity =
-            (view.isPlayer ? 0.42 : 0.24) + Math.sin(t * 6) * 0.06;
+          ringMat.opacity = view.isPlayer ? 0.38 : 0.24;
           if (view.isPlayer) ringMat.depthTest = false;
-          const ringScale = 1 + Math.sin(t * 4.5) * 0.04 + Math.min(1, speed / MAX_SPEED) * 0.1;
+          const ringScale = 1 + Math.min(1, speed / MAX_SPEED) * 0.08;
           view.hoverRing.scale.set(ringScale, ringScale, 1);
           view.hoverRing.renderOrder = view.isPlayer ? 999 : 0;
         } else {
@@ -950,9 +1221,16 @@ export class Renderer {
 
         if (view.isPlayer) {
           view.root.renderOrder = 500;
-          if (view.heroOutline) {
-            const pulse = 0.7 + Math.sin(t * 5) * 0.15;
-            (view.heroOutline.material as THREE.LineBasicMaterial).opacity = pulse;
+          if (view.heroAura) {
+            view.heroAura.rotation.y = t * 0.22;
+            const pulse = 0.88 + Math.sin(t * 3.5) * 0.12;
+            for (const child of view.heroAura.children) {
+              if (child instanceof THREE.LineSegments) {
+                (child.material as THREE.LineBasicMaterial).opacity = 0.08 + pulse * 0.07;
+              } else if (child instanceof THREE.Mesh) {
+                (child.material as THREE.MeshBasicMaterial).opacity = 0.02 + pulse * 0.022;
+              }
+            }
           }
         }
 
@@ -960,7 +1238,11 @@ export class Renderer {
 
         if (id === this.myId) {
           this.playerSpeed = speed;
-          this.playerYawRate = yawRate;
+          this.playerYawRate = THREE.MathUtils.lerp(
+            this.playerYawRate,
+            yawRate,
+            Math.min(1, frameDt * 6),
+          );
         }
       }
     }
@@ -969,42 +1251,43 @@ export class Renderer {
       const mine = this.cars.get(this.myId);
       if (mine) {
         const speedNorm = Math.min(1, this.playerSpeed / MAX_SPEED);
-        const boardY = mine.root.position.y;
-        const heightBoost = THREE.MathUtils.clamp((boardY - 4) * 0.18, 0, 2.5);
-        const targetFov = THREE.MathUtils.lerp(58, 72, speedNorm);
-        this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 0.08);
-        this.camera.updateProjectionMatrix();
+        const camBlend = Math.min(1, frameDt * 3.5);
 
         const followDist = THREE.MathUtils.lerp(CAM_DIST_MIN, CAM_DIST_MAX, speedNorm);
-        const followHeight =
-          THREE.MathUtils.lerp(CAM_HEIGHT_MIN, CAM_HEIGHT_MAX, speedNorm) + heightBoost;
+        const followHeight = THREE.MathUtils.lerp(CAM_HEIGHT_MIN, CAM_HEIGHT_MAX, speedNorm);
         this.tmpCamDesired
           .set(0, followHeight, followDist)
           .applyQuaternion(mine.root.quaternion)
           .add(mine.root.position);
 
-        // Look at the board (lower-center of screen), not far down the track.
         this.tmpCamFocus
           .set(0, 0.28, -0.8)
           .applyQuaternion(mine.root.quaternion)
           .add(mine.root.position);
 
-        const resolved = this.resolveCameraPosition(this.tmpCamFocus, this.tmpCamDesired);
-        this.camera.position.lerp(resolved, 0.12);
+        const resolved = this.resolveCameraPosition(this.tmpCamFocus, this.tmpCamDesired, frameDt);
+        this.camera.position.lerp(resolved, camBlend);
 
         if (!this.cameraInitialized) {
+          this.camera.position.copy(resolved);
           this.lookTarget.copy(this.tmpCamFocus);
+          this.smoothCamPull = followDist;
           this.cameraInitialized = true;
         }
-        this.lookTarget.lerp(this.tmpCamFocus, 0.16);
+        this.lookTarget.lerp(this.tmpCamFocus, camBlend);
         this.camera.lookAt(this.lookTarget);
+        this.camera.rotation.z = 0;
+      }
+    }
 
-        const lean = THREE.MathUtils.clamp(
-          -this.playerSteer * 0.04 - this.playerYawRate * 0.02,
-          -0.06,
-          0.06,
-        );
-        this.camera.rotation.z = THREE.MathUtils.lerp(this.camera.rotation.z, lean, 0.08);
+    if (this.repairMarker.visible) {
+      const pulse = 0.75 + Math.sin(performance.now() * 0.004) * 0.25;
+      const beam = this.repairMarker.getObjectByName("repair-beam") as THREE.Mesh | undefined;
+      const ring = this.repairMarker.getObjectByName("repair-ring") as THREE.Mesh | undefined;
+      if (beam) (beam.material as THREE.MeshBasicMaterial).opacity = 0.22 + pulse * 0.22;
+      if (ring) {
+        ring.scale.set(pulse, pulse, 1);
+        (ring.material as THREE.MeshBasicMaterial).opacity = 0.35 + pulse * 0.2;
       }
     }
 

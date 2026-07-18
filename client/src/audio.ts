@@ -175,4 +175,9 @@ export class GameAudio {
     window.setTimeout(() => void this.tone(659, 0.12, 0.035, "sine"), 100);
     window.setTimeout(() => void this.tone(784, 0.22, 0.04, "sine"), 200);
   }
+
+  hazardHit() {
+    void this.tone(88, 0.14, 0.07, "sawtooth");
+    window.setTimeout(() => void this.tone(55, 0.18, 0.05, "triangle"), 35);
+  }
 }

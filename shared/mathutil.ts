@@ -13,6 +13,11 @@ export function yawFromQuat(q: QuatL): number {
   return Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.x * q.x));
 }
 
+/** Shortest signed yaw difference in radians. */
+export function deltaYaw(from: number, to: number): number {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
 /** Rotate a horizontal vector (x,z) by the full quaternion; returns the horizontal result. */
 export function rotateYawVector(q: QuatL, v: { x: number; z: number }): { x: number; z: number } {
   const { x: qx, y: qy, z: qz, w: qw } = q;

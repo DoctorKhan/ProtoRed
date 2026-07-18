@@ -1,12 +1,13 @@
 import { Renderer } from "./render";
 import { readControls, setChatOpen } from "./input";
 import { updateCtfProgress } from "./ctf";
-import { bindUiHandlers, showGameUi, toggleControls } from "./ui";
+import { bindUiHandlers, showGameUi, toggleControls, setTerminalMode, isTerminalOpen, setSidePanel, syncTextFocusMode, isTextFocusPaused } from "./ui";
 import { GameAudio } from "./audio";
 import { createPhysics } from "./sim/physics";
 import { Game, GameStateSnapshot } from "./sim/game";
 import { AUTO_MODEL, createBrowserBrain } from "./sim/botbrain";
 import { PlayerInfo } from "../../shared/protocol";
+import { REDBUCKS_START } from "../../shared/economy";
 
 const app = document.getElementById("app")!;
 const joinOverlay = document.getElementById("join")!;
@@ -19,6 +20,10 @@ const keyStatus = document.getElementById("key-status")!;
 const hudSpeed = document.getElementById("hud-speed")!;
 const hudSpeedFill = document.getElementById("hud-speed-fill")!;
 const hudMission = document.getElementById("hud-mission")!;
+const hudRedBucks = document.getElementById("hud-redbucks")!;
+const hudHull = document.getElementById("hud-hull")!;
+const hudRepair = document.getElementById("hud-repair")!;
+
 const audio = new GameAudio();
 audio.bindUnlock();
 let raceStarted = false;
@@ -83,14 +88,88 @@ function randomDriverName(exclude = new Set<string>()): string {
 const renderer = new Renderer(app);
 const playersById = new Map<string, PlayerInfo>();
 
-function appendChat(name: string, color: string, isBot: boolean, text: string) {
+let lastHudRedBucks: number | null = null;
+
+function updateEconomyHud(m: {
+  redBucks: number;
+  hull: number;
+  upgradeTier: number;
+  inRepairBay: boolean;
+  maxSpeed: number;
+  zoneLabel: string | null;
+  zoneKind: "damage" | "repair" | null;
+  repairHint: string | null;
+  repairWaypoint: { x: number; z: number } | null;
+  pitRepairing: boolean;
+  pitNeedSlowdown: boolean;
+  docked: boolean;
+  terminalOpen: boolean;
+  canOpenTerminal: boolean;
+  bayCapturing: boolean;
+  bayCenterDist: number | null;
+}) {
+  hudRedBucks.textContent = `${m.redBucks} RB`;
+  if (lastHudRedBucks !== null && m.redBucks !== lastHudRedBucks) {
+    hudRedBucks.classList.add("ledger-flash");
+    window.setTimeout(() => hudRedBucks.classList.remove("ledger-flash"), 700);
+  }
+  lastHudRedBucks = m.redBucks;
+  hudHull.textContent = `Hull ${m.hull}%` + (m.upgradeTier > 0 ? ` · Tier ${m.upgradeTier}` : "");
+  hudHull.style.color = m.hull < 35 ? "#ff6644" : m.hull < 100 ? "#ffb347" : "";
+
+  if (m.zoneLabel && m.zoneKind === "damage") {
+    hudRepair.textContent = `⚠ ${m.zoneLabel} — leave or head to terminal (N/S)`;
+    hudRepair.classList.add("visible", "danger");
+  } else if (m.terminalOpen) {
+    hudRepair.textContent = `${m.zoneLabel ?? "Terminal"} — PAUSED · type exploits below · E/Esc to leave`;
+    hudRepair.classList.add("visible");
+    hudRepair.classList.remove("danger");
+  } else if (m.bayCapturing) {
+    const pull =
+      m.bayCenterDist !== null && m.bayCenterDist > 2.5
+        ? ` — sliding to center (${m.bayCenterDist.toFixed(0)}m)`
+        : m.bayCenterDist !== null && m.bayCenterDist > 0.5
+          ? " — settling on dock…"
+          : " — locking…";
+    hudRepair.textContent = `${m.zoneLabel ?? "Bay"}${pull}`;
+    hudRepair.classList.add("visible");
+    hudRepair.classList.remove("danger");
+  } else if (m.pitRepairing) {
+    hudRepair.textContent = `${m.zoneLabel ?? "Pit Stop"} — repairing hull…`;
+    hudRepair.classList.add("visible");
+    hudRepair.classList.remove("danger");
+  } else if (m.pitNeedSlowdown) {
+    hudRepair.textContent = `${m.zoneLabel ?? "Pit Stop"} — release throttle & brake to repair`;
+    hudRepair.classList.add("visible", "danger");
+  } else if (m.zoneLabel && m.zoneKind === "repair") {
+    hudRepair.textContent = `${m.zoneLabel} — release throttle to auto-brake & repair`;
+    hudRepair.classList.add("visible");
+    hudRepair.classList.remove("danger");
+  } else if (m.repairHint) {
+    hudRepair.textContent = m.repairHint;
+    hudRepair.classList.add("visible");
+    hudRepair.classList.toggle("danger", m.hull < 35);
+  } else {
+    hudRepair.textContent = "Drive · red zones damage · N/S terminals for service";
+    hudRepair.classList.remove("visible", "danger");
+  }
+  renderer.setHudMaxSpeed(m.maxSpeed);
+  renderer.setRepairWaypoint(m.repairWaypoint);
+}
+
+function appendChat(name: string, color: string, isBot: boolean, text: string, to?: string | null) {
   const line = document.createElement("div");
   const who = document.createElement("span");
   who.style.color = color;
   who.style.fontWeight = "700";
   who.textContent = name;
   line.appendChild(who);
-  if (isBot) {
+  if (to) {
+    const arrow = document.createElement("span");
+    arrow.style.color = "#9a88b8";
+    arrow.textContent = ` → ${to}`;
+    line.appendChild(arrow);
+  } else if (isBot) {
     const tag = document.createElement("span");
     tag.className = "bot-tag";
     tag.textContent = " [AI]";
@@ -140,6 +219,46 @@ function appendTelemetry(
 
 let game: Game | null = null;
 
+let simAccumulator = 0;
+let simPrevious = performance.now();
+const SIM_DT = 1 / 60;
+
+function frameLoop(now: number) {
+  requestAnimationFrame(frameLoop);
+  const paused = isTextFocusPaused();
+  if (game && raceStarted && !paused) {
+    simAccumulator += Math.min(0.1, Math.max(0, (now - simPrevious) / 1000));
+    simPrevious = now;
+    let firstStep = true;
+    while (simAccumulator >= SIM_DT) {
+      const controls = readControls(firstStep, firstStep);
+      if (firstStep && controls.interact) game.interact();
+      game.setInput(controls);
+      firstStep = false;
+      game.step(SIM_DT);
+      simAccumulator -= SIM_DT;
+    }
+
+    const controls = readControls(false, false);
+    renderer.setPlayerInput(controls.steer, controls.throttle);
+    if (game) renderer.setSimTime(game.time);
+    const { speed, maxSpeed } = renderer.getHudState();
+    audio.updateEngine(
+      speed,
+      controls.throttle,
+      controls.handbrake ?? false,
+      playerGrounded,
+    );
+    const kph = Math.round(speed * 3.6);
+    hudSpeed.textContent = String(kph);
+    hudSpeedFill.style.width = `${Math.min(100, (speed / maxSpeed) * 100)}%`;
+  } else if (game && raceStarted && paused) {
+    audio.updateEngine(0, 0, false, playerGrounded);
+  }
+  if (!paused) renderer.render();
+}
+requestAnimationFrame(frameLoop);
+
 async function startGame() {
   const savedState = readHmrState();
   const name = savedState?.humanName ?? randomDriverName();
@@ -177,7 +296,7 @@ async function startGame() {
       },
       onChat: (m) => {
         const p = playersById.get(m.id);
-        appendChat(m.name, p?.color ?? "#dde3ee", m.isBot, m.text);
+        appendChat(m.name, p?.color ?? "#dde3ee", m.isBot, m.text, m.to);
       },
       onBotDecision: (m) => appendTelemetry(m.name, m.action, m.source, m.say, m.model),
       onCtfProgress: (m) => {
@@ -193,6 +312,21 @@ async function startGame() {
       onJump: (id) => {
         if (id === game?.myId) audio.jump();
       },
+      onHazardHit: (id) => {
+        if (id === game?.myId) audio.hazardHit();
+      },
+      onEconomy: (m) => updateEconomyHud(m),
+      onTerminal: (m) => {
+        setTerminalMode(m.open, m.label);
+        if (m.open) {
+          setChatOpen(true);
+          setSidePanel("mission");
+          window.setTimeout(() => chatInput.focus(), 80);
+        } else {
+          chatInput.blur();
+          setChatOpen(false);
+        }
+      },
     });
 
     game.start();
@@ -203,41 +337,22 @@ async function startGame() {
     showGameUi();
     appendSystem(
       key
-        ? `Connected as ${name}. Press H for controls · M toggles mission/feed.`
-        : `Connected as ${name}. Press H for controls · click “AI: scripted” to add a key.`,
+        ? `Connected as ${name}. Race the circuit · terminals (N/S) auto-stop you for treasury chat.`
+        : `Connected as ${name}. Scripted bots · roll into N/S terminals · AI pill for key.`,
     );
 
-    // Continuous fixed-step simulation with a render-driven accumulator. This avoids
-    // setInterval drift while Renderer interpolates between the 20 Hz snapshots.
-    const fixedDt = 1 / 60;
-    let previous = performance.now();
-    let accumulator = 0;
-    const simulationFrame = (now: number) => {
-      if (!game || !raceStarted) return;
-      accumulator += Math.min(0.1, Math.max(0, (now - previous) / 1000));
-      previous = now;
-      let firstStep = true;
-      while (accumulator >= fixedDt) {
-        game.setInput(readControls(firstStep));
-        firstStep = false;
-        game.step(fixedDt);
-        accumulator -= fixedDt;
-      }
-      requestAnimationFrame(simulationFrame);
-    };
-    requestAnimationFrame(simulationFrame);
-    startChatUi();
     bindUiHandlers({
       onEscape: () => {
         if (document.activeElement === chatInput) {
           chatInput.blur();
-          chatInput.classList.remove("open");
           setChatOpen(false);
           return true;
         }
         return false;
       },
+      onCloseTerminal: () => game?.toggleTerminal(),
     });
+    startChatUi();
     window.setTimeout(() => toggleControls(true), 600);
     window.setTimeout(() => toggleControls(false), 4500);
   } catch (error) {
@@ -263,23 +378,37 @@ function saveHmrState() {
 void startGame();
 
 function startChatUi() {
-  window.addEventListener("keydown", (e) => {
-    if (e.code === "Enter" && document.activeElement !== chatInput) {
-      chatInput.classList.add("open");
+  const addressBar = document.getElementById("chat-address");
+  addressBar?.querySelectorAll<HTMLButtonElement>(".addr-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!isTerminalOpen()) return;
+      const bot = btn.dataset.bot;
+      if (!bot) return;
       chatInput.focus();
       setChatOpen(true);
-      e.preventDefault();
-    }
+      const existing = chatInput.value.trim();
+      chatInput.value = existing ? `@${bot} ${existing}` : `@${bot} `;
+    });
   });
+
+  document.getElementById("btn-repair")?.addEventListener("click", () => game?.repairHull());
+  document.getElementById("btn-upgrade")?.addEventListener("click", () => game?.buyUpgrade());
+
+  chatInput.addEventListener("focus", () => {
+    setChatOpen(true);
+    syncTextFocusMode();
+  });
+  chatInput.addEventListener("blur", () => {
+    if (!isTerminalOpen()) setChatOpen(false);
+    syncTextFocusMode();
+  });
+
   chatInput.addEventListener("keydown", (e) => {
     if (e.code === "Enter") {
       const text = chatInput.value.trim();
       if (text) game?.sendChat(text);
       if (text) audio.chat();
       chatInput.value = "";
-      chatInput.blur();
-      chatInput.classList.remove("open");
-      setChatOpen(false);
       e.stopPropagation();
     }
   });
@@ -295,26 +424,6 @@ keyStatus.addEventListener("click", () => {
   else localStorage.removeItem(KEY_LS);
   keyStatus.textContent = getKey() ? "AI: automatic routing" : "AI: scripted";
 });
-
-function animate() {
-  requestAnimationFrame(animate);
-  if (game && raceStarted) {
-    const controls = readControls(false);
-    renderer.setPlayerInput(controls.steer, controls.throttle);
-    const { speed, maxSpeed } = renderer.getHudState();
-    audio.updateEngine(
-      speed,
-      controls.throttle,
-      controls.handbrake ?? false,
-      playerGrounded,
-    );
-    const kph = Math.round(speed * 3.6);
-    hudSpeed.textContent = String(kph);
-    hudSpeedFill.style.width = `${Math.min(100, (speed / maxSpeed) * 100)}%`;
-  }
-  renderer.render();
-}
-animate();
 
 if (import.meta.hot) {
   import.meta.hot.dispose(saveHmrState);

@@ -11,7 +11,8 @@ import { CarState } from "../shared/protocol";
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 // Inject the deterministic scripted brain (no network).
-const decide: DecideFn = async (persona, _self, others) => scriptedDecision(persona, others);
+const decide: DecideFn = async (persona, _self, others, chat) =>
+  scriptedDecision(persona, others, chat);
 
 describe("Game (headless sim)", () => {
   it("runs the loop: physics steps, bots decide, snapshots + CTF progress flow", async () => {
