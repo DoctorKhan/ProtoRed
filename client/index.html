@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Redliner Protocol</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; overflow: hidden; background: #000000; }
+      body { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #b8e8f8; }
+
+      :root {
+        --glass: rgba(0, 4, 8, 0.82);
+        --border: rgba(0, 238, 255, 0.28);
+        --accent-race: #ff7a2f;
+        --accent-grid: #00eeff;
+        --accent-feed: #00eeff;
+        --accent-mission: #ffb347;
+        --accent-chat: #7af0ff;
+        --accent-key: #33cc88;
+        --text-dim: #3a6670;
+        --text-muted: #6a9aaa;
+      }
+
+      #app { position: fixed; inset: 0; }
+
+      /* ── loading splash ── */
+      #join {
+        position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+        background:
+          radial-gradient(ellipse 80% 60% at 50% 40%, rgba(0, 238, 255, 0.07) 0%, transparent 70%),
+          #000000;
+        flex-direction: column; gap: 20px; z-index: 20;
+        transition: opacity 0.35s;
+      }
+      #join.hidden { opacity: 0; pointer-events: none; }
+      #join h1 {
+        font-size: clamp(36px, 6vw, 58px); font-weight: 900; letter-spacing: 6px;
+        color: #fff;
+        text-shadow: 0 0 40px rgba(0, 238, 255, 0.5), 0 0 12px rgba(0, 238, 255, 0.25);
+        line-height: 1.1; text-align: center;
+      }
+      #join .tagline {
+        font-size: clamp(11px, 1.8vw, 14px); letter-spacing: 4px; color: var(--accent-grid);
+        text-transform: uppercase; font-weight: 700;
+      }
+      #join .status {
+        font-size: 15px; color: var(--text-muted); max-width: 480px; text-align: center;
+        line-height: 1.5;
+      }
+      #join .status.muted { color: var(--text-dim); font-size: 13px; letter-spacing: 0.5px; }
+
+      /* ── in-game shell ── */
+      #game-ui {
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.4s;
+      }
+      #game-ui.ready { opacity: 1; pointer-events: auto; }
+
+      .controls-panel {
+        color: var(--text-muted); background: var(--glass);
+        border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      }
+      .controls-title {
+        color: var(--accent-grid); font-size: 9px; letter-spacing: 2px;
+        margin-bottom: 10px; font-weight: 700;
+      }
+      .controls-grid {
+        display: grid; grid-template-columns: auto auto; gap: 6px 20px; align-items: center;
+      }
+      .control { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 11px; }
+      .control .action { color: #c8d0e0; }
+      .key {
+        display: inline-block; background: #000810; color: var(--accent-grid);
+        border: 1px solid rgba(0, 238, 255, 0.4); padding: 1px 6px; border-radius: 4px;
+        font-weight: 700; font-size: 10px; min-width: 18px; text-align: center;
+      }
+
+      /* ── controls overlay (H or ? button) ── */
+      #controls-overlay {
+        position: fixed; inset: 0; z-index: 18;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(4, 6, 10, 0.55); backdrop-filter: blur(3px);
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.2s;
+      }
+      #controls-overlay.open { opacity: 1; pointer-events: auto; }
+      #controls-overlay .controls-panel { width: min(360px, 92vw); }
+      #controls-overlay .controls-note {
+        margin-top: 12px; padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        font-size: 10px; color: var(--text-dim); line-height: 1.5;
+      }
+
+      /* ── bottom dock ── */
+      #ui-dock {
+        position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+        z-index: 12; display: flex; align-items: center; gap: 8px;
+        background: var(--glass); border: 1px solid var(--border);
+        border-radius: 999px; padding: 6px 10px 6px 6px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+      }
+      .dock-btn {
+        background: rgba(0, 238, 255, 0.08); border: 1px solid rgba(0, 238, 255, 0.35);
+        color: var(--accent-grid); font: inherit; font-size: 12px; font-weight: 800;
+        width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.15s, box-shadow 0.15s;
+      }
+      .dock-btn:hover { background: rgba(0, 238, 255, 0.16); }
+      .dock-btn.active {
+        background: rgba(0, 238, 255, 0.22);
+        box-shadow: 0 0 16px rgba(0, 238, 255, 0.25);
+      }
+      #dock-hint {
+        font-size: 10px; color: var(--text-dim); letter-spacing: 0.3px;
+        padding: 0 6px; white-space: nowrap;
+      }
+      .dock-sep { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.08); }
+
+      /* ── right panel tabs ── */
+      #panel-tabs {
+        position: fixed; right: 16px; top: 16px; z-index: 11;
+        display: flex; gap: 4px;
+      }
+      .panel-tab {
+        background: var(--glass); border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-dim); font: inherit; font-size: 9px; font-weight: 700;
+        letter-spacing: 1.5px; padding: 7px 12px; border-radius: 6px;
+        cursor: pointer; backdrop-filter: blur(8px);
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .panel-tab:hover { color: var(--text-muted); }
+      .panel-tab.active[data-panel="feed"] {
+        color: var(--accent-feed); border-color: rgba(77, 212, 255, 0.35);
+        background: rgba(77, 212, 255, 0.08);
+      }
+      .panel-tab.active[data-panel="mission"] {
+        color: var(--accent-mission); border-color: rgba(255, 179, 71, 0.35);
+        background: rgba(255, 179, 71, 0.08);
+      }
+
+      /* ── speed HUD ── */
+      #hud {
+        position: fixed; left: 16px; top: 16px; z-index: 10;
+        background: var(--glass); border: 1px solid var(--border);
+        border-left: 3px solid var(--accent-race);
+        box-shadow: 0 0 24px rgba(0, 238, 255, 0.06);
+        padding: 12px 16px; border-radius: 6px;
+        backdrop-filter: blur(8px);
+        display: flex; flex-direction: column; gap: 4px; min-width: 120px;
+      }
+      #hud-speed {
+        font-size: 42px; font-weight: 900; color: #fff; line-height: 1;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 0 20px rgba(255, 122, 47, 0.4);
+      }
+      #hud-speed-unit { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; }
+      #hud-status {
+        font-size: 10px; color: var(--accent-race); letter-spacing: 1.5px;
+        font-weight: 700; margin-top: 4px;
+      }
+      #hud-mission {
+        font-size: 10px; color: var(--text-muted); letter-spacing: 0.5px;
+      }
+      .speed-bar {
+        height: 3px; background: rgba(255, 85, 34, 0.15); border-radius: 999px;
+        overflow: hidden; margin-top: 6px; width: 100%;
+      }
+      #hud-speed-fill {
+        height: 100%; background: linear-gradient(90deg, #ff5522, #ffaa44);
+        width: 0%; transition: width 80ms linear;
+        box-shadow: 0 0 8px rgba(255, 85, 34, 0.5);
+      }
+
+      /* ── race feed ── */
+      #telemetry {
+        position: fixed; right: 16px; top: 52px; width: 320px; z-index: 10;
+        background: var(--glass); border: 1px solid rgba(77, 212, 255, 0.18);
+        border-left: 3px solid var(--accent-feed);
+        border-radius: 6px; padding: 10px 12px;
+        font-size: 10px; line-height: 1.55; backdrop-filter: blur(8px);
+        max-height: min(240px, 32vh); overflow: hidden; display: flex; flex-direction: column;
+        transition: opacity 0.2s, transform 0.2s;
+      }
+      #telemetry.hidden { opacity: 0; pointer-events: none; transform: translateX(8px); }
+      #telemetry h2 {
+        font-size: 9px; color: var(--accent-feed); letter-spacing: 2px;
+        margin-bottom: 8px; font-weight: 700; flex: none;
+      }
+      #telemetry-log { overflow-y: auto; flex: 1; }
+      #telemetry .entry { margin-bottom: 5px; color: var(--text-muted); }
+      #telemetry .entry b { color: #dde3ee; }
+      #telemetry .src { opacity: 0.5; font-size: 9px; }
+
+      /* ── mission console ── */
+      #ctf {
+        position: fixed; right: 16px; top: 52px; width: 320px; z-index: 10;
+        background: var(--glass); border: 1px solid rgba(255, 179, 71, 0.18);
+        border-left: 3px solid var(--accent-mission);
+        border-radius: 6px; padding: 10px 12px; font-size: 10px;
+        backdrop-filter: blur(8px);
+        max-height: min(calc(100vh - 120px), 70vh); overflow-y: auto;
+        transition: opacity 0.2s, transform 0.2s;
+      }
+      #ctf.hidden { opacity: 0; pointer-events: none; transform: translateX(8px); }
+      #ctf h2 {
+        font-size: 9px; color: var(--accent-mission); letter-spacing: 2px;
+        margin-bottom: 10px; font-weight: 700;
+      }
+      #ctf .lvl {
+        display: flex; gap: 7px; padding: 6px 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.05); align-items: baseline;
+      }
+      #ctf .lvl:first-of-type { border-top: 0; }
+      #ctf .badge {
+        flex: none; width: 16px; height: 16px; border-radius: 3px;
+        text-align: center; line-height: 16px; font-size: 9px; font-weight: 700;
+      }
+      #ctf .locked   { background: #141a24; color: #4a5568; border: 1px solid #1e2636; }
+      #ctf .current  { background: var(--accent-mission); color: #14100a; }
+      #ctf .solved   { background: var(--accent-key); color: #08130d; }
+      #ctf .body { flex: 1; }
+      #ctf .title { font-weight: 700; color: #dde3ee; font-size: 10px; }
+      #ctf .lvl.is-locked .title { color: #4a5568; }
+      #ctf .obj { color: var(--text-muted); margin-top: 2px; }
+      #ctf .hint { color: var(--text-dim); margin-top: 3px; font-style: italic; }
+      #ctf .lesson { color: var(--accent-key); margin-top: 3px; }
+      #ctf .done { color: var(--accent-key); font-size: 10px; margin-top: 4px; }
+
+      /* ── chat ── */
+      #chat {
+        position: fixed; left: 16px; bottom: 58px; width: min(360px, calc(100vw - 32px)); z-index: 10;
+        display: flex; flex-direction: column; gap: 5px;
+      }
+      #chat-log {
+        max-height: min(180px, 28vh); overflow-y: auto; display: flex; flex-direction: column; gap: 3px;
+        font-size: 11px; line-height: 1.45; padding: 10px 12px;
+        background: var(--glass); border: 1px solid rgba(179, 136, 255, 0.15);
+        border-left: 3px solid var(--accent-chat);
+        border-radius: 6px; backdrop-filter: blur(8px);
+      }
+      #chat-log:empty { display: none; }
+      #chat-log .bot-tag { opacity: 0.55; font-size: 9px; }
+      #chat-input {
+        background: rgba(10, 14, 22, 0.92); border: 1px solid rgba(179, 136, 255, 0.25);
+        color: #dde3ee; padding: 8px 12px; font: inherit; font-size: 11px;
+        border-radius: 6px; outline: none; display: none;
+      }
+      #chat-input.open { display: block; }
+      #chat-hint {
+        font-size: 10px; color: var(--text-dim); padding-left: 4px; letter-spacing: 0.3px;
+      }
+
+      /* ── AI key pill ── */
+      #key-status {
+        position: fixed; left: 16px; top: 130px; z-index: 10;
+        font-size: 10px; letter-spacing: 0.5px;
+        color: #08130d; background: var(--accent-key);
+        padding: 6px 12px; border-radius: 4px; cursor: pointer;
+        border: 1px solid rgba(51, 204, 136, 0.5); font-weight: 700;
+        backdrop-filter: blur(4px);
+      }
+      #key-status:hover { filter: brightness(1.08); }
+      #key-status.scripted {
+        background: rgba(255, 179, 71, 0.15); border-color: rgba(255, 179, 71, 0.4);
+        color: var(--accent-mission);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="join">
+      <h1>REDLINER<br>PROTOCOL</h1>
+      <div class="tagline">NEON GRID / AI SECURITY CIRCUIT</div>
+      <div id="join-status" class="status">Booting arena…</div>
+      <div id="join-hint" class="status muted">WASD · drive · Space · jump · H · controls</div>
+    </div>
+
+    <div id="game-ui">
+      <div id="hud">
+        <div id="hud-speed">0</div>
+        <div id="hud-speed-unit">KM/H</div>
+        <div class="speed-bar"><div id="hud-speed-fill"></div></div>
+        <div id="hud-status">CIRCUIT LIVE</div>
+        <div id="hud-mission">MISSION — STANDBY</div>
+      </div>
+
+      <div id="key-status" class="scripted" title="Click to add an OpenRouter key">AI: scripted</div>
+
+      <div id="panel-tabs" role="tablist" aria-label="Side panels">
+        <button id="tab-feed" class="panel-tab" type="button" role="tab" data-panel="feed" aria-selected="false">FEED</button>
+        <button id="tab-mission" class="panel-tab active" type="button" role="tab" data-panel="mission" aria-selected="true">MISSION</button>
+      </div>
+
+      <div id="telemetry" role="tabpanel">
+        <h2>RACE FEED — BOT TELEMETRY</h2>
+        <div id="telemetry-log"></div>
+      </div>
+
+      <div id="ctf" role="tabpanel">
+        <h2>MISSION CONSOLE — CTF LADDER</h2>
+        <div id="ctf-levels"></div>
+      </div>
+
+      <div id="chat">
+        <div id="chat-log"></div>
+        <input id="chat-input" maxlength="200" placeholder="say something… (Esc to close)" autocomplete="off" />
+        <div id="chat-hint">Enter to chat — the AI drivers are listening</div>
+      </div>
+
+      <div id="ui-dock">
+        <button id="btn-controls" class="dock-btn" type="button" title="Controls (H)" aria-expanded="false" aria-label="Show controls">?</button>
+        <span id="dock-hint">H · controls  ·  Enter · chat</span>
+        <span class="dock-sep"></span>
+        <span id="dock-mission" class="dock-hint" style="color: var(--text-muted)">M · switch panel</span>
+      </div>
+    </div>
+
+    <div id="controls-overlay" aria-hidden="true">
+      <div class="controls-panel">
+        <div class="controls-title">CONTROLS</div>
+        <div class="controls-grid">
+          <div class="control"><span class="key">W</span><span class="key">↑</span><span class="action">accelerate</span></div>
+          <div class="control"><span class="key">S</span><span class="key">↓</span><span class="action">brake / drop (air)</span></div>
+          <div class="control"><span class="key">A</span><span class="key">D</span><span class="action">steer</span></div>
+          <div class="control"><span class="key">←</span><span class="key">→</span><span class="action">steer</span></div>
+          <div class="control"><span class="key">Space</span><span class="action">jump</span></div>
+          <div class="control"><span class="key">Shift</span><span class="action">handbrake</span></div>
+          <div class="control"><span class="key">Enter</span><span class="action">chat</span></div>
+          <div class="control"><span class="key">H</span><span class="action">this menu</span></div>
+          <div class="control"><span class="key">M</span><span class="action">feed / mission</span></div>
+          <div class="control"><span class="key">Esc</span><span class="action">close menus</span></div>
+        </div>
+        <div class="controls-note">
+          Chat with the AI drivers to progress the CTF. Click the AI pill (top-left) to paste an OpenRouter key.
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
