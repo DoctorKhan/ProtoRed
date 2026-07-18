@@ -42,10 +42,13 @@ const CAM_DIST_MIN = 8.5;
 const CAM_DIST_MAX = 11.5;
 const CAM_HEIGHT_MIN = 4.8;
 const CAM_HEIGHT_MAX = 6.2;
-const TRON_VOID = 0x000000;
-const TRON_CYAN = 0x00eeff;
-const TRON_CYAN_DIM = 0x006677;
-const TRON_CYAN_FAINT = 0x003344;
+const VOID = 0x0c0616;
+const TIDE_TEAL = 0x42ffd8;
+const TIDE_MAGENTA = 0xff5cab;
+const TIDE_GOLD = 0xffc86b;
+const TIDE_VIOLET = 0x8b6cff;
+const TIDE_DIM = 0x3a2858;
+const PEARL = 0xf2e6ff;
 
 const patternTextures = new Map<string, THREE.CanvasTexture>();
 
@@ -64,7 +67,7 @@ function patternTexture(
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#010204";
+  ctx.fillStyle = "#0a0414";
   ctx.fillRect(0, 0, size, size);
   draw(ctx, size);
   const tex = new THREE.CanvasTexture(canvas);
@@ -75,70 +78,53 @@ function patternTexture(
   return tex;
 }
 
-function drawCircuitGrid(ctx: CanvasRenderingContext2D, size: number, accent: number) {
-  const cell = size / 8;
+function drawSonarRipples(ctx: CanvasRenderingContext2D, size: number, accent: number) {
+  const cx = size / 2;
+  const cy = size / 2;
   const color = accentCss(accent);
   ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.12;
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 8; i++) {
-    const p = i * cell;
+  for (let i = 1; i <= 9; i++) {
+    ctx.globalAlpha = 0.08 + (i % 3) * 0.05;
+    ctx.lineWidth = i % 2 === 0 ? 1.5 : 1;
     ctx.beginPath();
-    ctx.moveTo(p, 0);
-    ctx.lineTo(p, size);
-    ctx.moveTo(0, p);
-    ctx.lineTo(size, p);
+    ctx.arc(cx, cy, (size / 20) * i, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.globalAlpha = 0.35;
-  for (let i = 0; i <= 8; i += 2) {
-    const p = i * cell;
-    ctx.beginPath();
-    ctx.moveTo(p, 0);
-    ctx.lineTo(p, size);
-    ctx.moveTo(0, p);
-    ctx.lineTo(size, p);
-    ctx.stroke();
-  }
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.55;
-  for (let i = 1; i < 8; i += 2) {
-    for (let j = 1; j < 8; j += 2) {
-      ctx.beginPath();
-      ctx.arc(i * cell, j * cell, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  ctx.globalAlpha = 0.45;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(cell * 0.5, cell * 2);
-  ctx.bezierCurveTo(cell * 2, cell * 1, cell * 5, cell * 3, cell * 7.5, cell * 2);
-  ctx.moveTo(cell * 1, cell * 6);
-  ctx.bezierCurveTo(cell * 3, cell * 4.5, cell * 5.5, cell * 7, cell * 7, cell * 5.5);
+  ctx.moveTo(cx, cy - size * 0.35);
+  ctx.bezierCurveTo(cx + size * 0.2, cy, cx - size * 0.15, cy + size * 0.25, cx, cy + size * 0.38);
   ctx.stroke();
 }
 
-function drawHexMesh(ctx: CanvasRenderingContext2D, size: number, accent: number) {
+function drawCoralHex(ctx: CanvasRenderingContext2D, size: number, accent: number) {
   const color = accentCss(accent);
-  const r = size / 10;
+  const alt = accentCss(TIDE_MAGENTA);
+  const r = size / 11;
   const h = r * Math.sqrt(3);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  for (let row = -1; row < 12; row++) {
-    for (let col = -1; col < 12; col++) {
+  for (let row = -1; row < 13; row++) {
+    for (let col = -1; col < 13; col++) {
       const cx = col * r * 1.5 + (row % 2 ? r * 0.75 : 0);
       const cy = row * h * 0.5;
-      ctx.globalAlpha = 0.18 + ((row + col) % 3) * 0.08;
+      const filled = (row + col) % 4 === 0;
       ctx.beginPath();
       for (let k = 0; k < 6; k++) {
         const a = (Math.PI / 3) * k + Math.PI / 6;
-        const x = cx + r * 0.9 * Math.cos(a);
-        const y = cy + r * 0.9 * Math.sin(a);
+        const x = cx + r * 0.88 * Math.cos(a);
+        const y = cy + r * 0.88 * Math.sin(a);
         if (k === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
       ctx.closePath();
+      if (filled) {
+        ctx.fillStyle = (row + col) % 2 === 0 ? color : alt;
+        ctx.globalAlpha = 0.12;
+        ctx.fill();
+      }
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.22;
+      ctx.lineWidth = 1;
       ctx.stroke();
     }
   }
@@ -146,74 +132,81 @@ function drawHexMesh(ctx: CanvasRenderingContext2D, size: number, accent: number
 
 function drawDeckArt(ctx: CanvasRenderingContext2D, size: number, accent: number) {
   const color = accentCss(accent);
-  drawCircuitGrid(ctx, size, accent);
+  const alt = accentCss(TIDE_VIOLET);
   ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.45;
   ctx.lineWidth = 2;
-  ctx.globalAlpha = 0.5;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 3; i++) {
     ctx.beginPath();
-    const y = size * (0.15 + i * 0.17);
+    const y = size * (0.28 + i * 0.22);
     ctx.moveTo(size * 0.08, y);
-    ctx.bezierCurveTo(size * 0.35, y - size * 0.06, size * 0.65, y + size * 0.06, size * 0.92, y);
+    ctx.bezierCurveTo(size * 0.3, y - size * 0.12, size * 0.72, y + size * 0.1, size * 0.92, y - size * 0.04);
     ctx.stroke();
   }
-  ctx.globalAlpha = 0.65;
+  ctx.strokeStyle = alt;
+  ctx.globalAlpha = 0.55;
   ctx.beginPath();
-  ctx.moveTo(size * 0.5, size * 0.08);
-  ctx.lineTo(size * 0.38, size * 0.22);
-  ctx.lineTo(size * 0.62, size * 0.22);
-  ctx.closePath();
+  ctx.arc(size * 0.5, size * 0.52, size * 0.11, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.2;
+  ctx.beginPath();
+  ctx.arc(size * 0.5, size * 0.52, size * 0.04, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-function drawVerticalCircuit(ctx: CanvasRenderingContext2D, size: number, accent: number) {
+function drawRibVeins(ctx: CanvasRenderingContext2D, size: number, accent: number) {
   const color = accentCss(accent);
   ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.25;
-  for (let i = 1; i < 6; i++) {
-    const x = (size / 6) * i;
-    ctx.lineWidth = i % 2 === 0 ? 2 : 1;
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 5; i++) {
+    const x = size * (0.12 + i * 0.18);
+    ctx.globalAlpha = 0.2 + (i % 2) * 0.12;
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, size);
+    ctx.moveTo(x, size * 0.05);
+    ctx.bezierCurveTo(x + size * 0.04, size * 0.35, x - size * 0.05, size * 0.65, x + size * 0.02, size * 0.95);
     ctx.stroke();
   }
-  ctx.globalAlpha = 0.4;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(size * 0.2, size * 0.15);
-  ctx.lineTo(size * 0.2, size * 0.85);
-  ctx.moveTo(size * 0.8, size * 0.1);
-  ctx.lineTo(size * 0.75, size * 0.9);
-  ctx.stroke();
 }
 
-type PatternKind = "circuit" | "hex" | "deck" | "vertical";
+type PatternKind = "sonar" | "coral" | "deck" | "veins";
 
 function surfaceMaterial(
   kind: PatternKind,
   repeatX: number,
   repeatY: number,
-  accent = TRON_CYAN,
+  accent = TIDE_TEAL,
   intensity = 0.32,
 ): THREE.MeshStandardMaterial {
   const key = `${kind}-${accent}`;
   const baseTex = patternTexture(key, (ctx, size) => {
-    if (kind === "circuit") drawCircuitGrid(ctx, size, accent);
-    else if (kind === "hex") drawHexMesh(ctx, size, accent);
+    if (kind === "sonar") drawSonarRipples(ctx, size, accent);
+    else if (kind === "coral") drawCoralHex(ctx, size, accent);
     else if (kind === "deck") drawDeckArt(ctx, size, accent);
-    else drawVerticalCircuit(ctx, size, accent);
+    else drawRibVeins(ctx, size, accent);
   });
   const tex = baseTex.clone();
   tex.repeat.set(repeatX, repeatY);
   return new THREE.MeshStandardMaterial({
-    color: 0x020408,
+    color: 0x120a1c,
     map: tex,
     emissiveMap: tex,
     emissive: accent,
     emissiveIntensity: intensity,
+    roughness: 0.22,
+    metalness: 0.72,
+  });
+}
+
+function structureMaterial(accent = TIDE_VIOLET): THREE.MeshPhysicalMaterial {
+  return new THREE.MeshPhysicalMaterial({
+    color: 0x140818,
     roughness: 0.14,
-    metalness: 0.9,
+    metalness: 0.62,
+    emissive: accent,
+    emissiveIntensity: 0.14,
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.18,
   });
 }
 
@@ -222,11 +215,11 @@ function addFaceDecal(
   w: number,
   h: number,
   d: number,
-  accent = TRON_CYAN,
+  accent = TIDE_TEAL,
 ) {
   const top = new THREE.Mesh(
     new THREE.PlaneGeometry(w * 0.94, d * 0.94),
-    surfaceMaterial("hex", Math.max(1, w / 3), Math.max(1, d / 3), accent, 0.38),
+    surfaceMaterial("coral", Math.max(1, w / 3), Math.max(1, d / 3), accent, 0.34),
   );
   top.rotation.x = -Math.PI / 2;
   top.position.y = h / 2 + 0.01;
@@ -235,7 +228,7 @@ function addFaceDecal(
   const mkSide = (rotY: number, px: number, pz: number, sw: number, sh: number) => {
     const side = new THREE.Mesh(
       new THREE.PlaneGeometry(sw * 0.94, sh * 0.94),
-      surfaceMaterial("vertical", Math.max(1, sw / 2), Math.max(1, sh / 2), accent, 0.28),
+      surfaceMaterial("veins", Math.max(1, sw / 2), Math.max(1, sh / 2), accent, 0.24),
     );
     side.rotation.y = rotY;
     side.position.set(px, 0, pz);
@@ -247,28 +240,21 @@ function addFaceDecal(
   mkSide(-Math.PI / 2, -w / 2 - 0.01, 0, d, h);
 }
 
-function addTopArcs(group: THREE.Group, w: number, d: number, y: number, accent: number) {
+function addTopSpirals(group: THREE.Group, w: number, d: number, y: number, accent: number) {
   const verts: number[] = [];
-  const segs = 8;
+  const segs = 24;
   for (let i = 0; i <= segs; i++) {
     const t = i / segs;
-    const x = (t - 0.5) * w * 0.85;
-    const z1 = Math.sin(t * Math.PI * 2) * d * 0.12;
-    const z2 = -d * 0.38 + t * d * 0.76;
-    verts.push(x, y, z1, x, y, z2);
-  }
-  for (let i = 0; i <= segs; i++) {
-    const t = i / segs;
-    const z = (t - 0.5) * d * 0.85;
-    const x = Math.cos(t * Math.PI * 1.5) * w * 0.1;
-    verts.push(x, y, z, -x, y, z);
+    const ang = t * Math.PI * 3;
+    const rad = (0.12 + t * 0.38) * Math.min(w, d);
+    verts.push(Math.cos(ang) * rad, y, Math.sin(ang) * rad, Math.cos(ang + 0.4) * rad * 0.92, y, Math.sin(ang + 0.4) * rad * 0.92);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
   group.add(
     new THREE.LineSegments(
       geo,
-      new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: 0.42 }),
+      new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: 0.38 }),
     ),
   );
 }
@@ -310,60 +296,60 @@ function yawQuat(yaw: number, target: THREE.Quaternion) {
   target.set(0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2));
 }
 
-function lineGrid(size: number, divisions: number, y: number, color: number, opacity: number): THREE.LineSegments {
-  const step = size / divisions;
-  const half = size / 2;
-  const verts: number[] = [];
-  for (let i = 0; i <= divisions; i++) {
-    const o = -half + i * step;
-    verts.push(-half, y, o, half, y, o);
-    verts.push(o, y, -half, o, y, half);
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-  return new THREE.LineSegments(
-    geo,
-    new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
-  );
-}
-
-function makeTronGrid(size: number): THREE.Group {
+function makeAuroraBackdrop(): THREE.Group {
   const group = new THREE.Group();
-  group.add(lineGrid(size, 64, 0.02, TRON_CYAN_FAINT, 0.35));
-  group.add(lineGrid(size, 16, 0.025, TRON_CYAN_DIM, 0.55));
-  group.add(lineGrid(size, 4, 0.03, TRON_CYAN, 0.85));
-  const half = size / 2;
-  const axisVerts = new Float32Array([
-    -half, 0.035, 0, half, 0.035, 0,
-    0, 0.035, -half, 0, 0.035, half,
-  ]);
-  const axisGeo = new THREE.BufferGeometry();
-  axisGeo.setAttribute("position", new THREE.BufferAttribute(axisVerts, 3));
-  group.add(
-    new THREE.LineSegments(
-      axisGeo,
-      new THREE.LineBasicMaterial({ color: TRON_CYAN, transparent: true, opacity: 0.95 }),
-    ),
-  );
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  const grad = ctx.createLinearGradient(0, 0, 512, 256);
+  grad.addColorStop(0, "rgba(66, 255, 216, 0)");
+  grad.addColorStop(0.35, "rgba(66, 255, 216, 0.35)");
+  grad.addColorStop(0.55, "rgba(255, 92, 171, 0.45)");
+  grad.addColorStop(0.75, "rgba(139, 108, 255, 0.25)");
+  grad.addColorStop(1, "rgba(12, 6, 22, 0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    opacity: 0.55,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  for (let i = 0; i < 5; i++) {
+    const sheet = new THREE.Mesh(new THREE.PlaneGeometry(220, 55 + i * 8), mat.clone());
+    sheet.position.set((i - 2) * 28, 22 + i * 3, -ARENA_HALF + 8 - i * 4);
+    sheet.rotation.y = (i - 2) * 0.22;
+    sheet.rotation.x = -0.08;
+    group.add(sheet);
+  }
   return group;
 }
 
-function makeHorizonRing(radius: number): THREE.Group {
+function makeFloatingMotes(): THREE.Group {
   const group = new THREE.Group();
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(radius - 0.35, radius, 96),
-    new THREE.MeshBasicMaterial({
-      color: TRON_CYAN,
+  const colors = [TIDE_TEAL, TIDE_MAGENTA, TIDE_GOLD, TIDE_VIOLET];
+  const geo = new THREE.SphereGeometry(0.12, 6, 6);
+  for (let i = 0; i < 48; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: colors[i % colors.length],
       transparent: true,
-      opacity: 0.45,
-      side: THREE.DoubleSide,
+      opacity: 0.35 + (i % 3) * 0.12,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-    }),
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.04;
-  group.add(ring);
+    });
+    const mote = new THREE.Mesh(geo, mat);
+    mote.position.set(
+      (Math.random() - 0.5) * ARENA_HALF * 1.6,
+      3 + Math.random() * 14,
+      (Math.random() - 0.5) * ARENA_HALF * 1.6,
+    );
+    mote.scale.setScalar(0.6 + Math.random() * 1.4);
+    group.add(mote);
+  }
   return group;
 }
 
@@ -372,16 +358,6 @@ function wireframeShell(geometry: THREE.BufferGeometry, color: number, opacity =
     new THREE.EdgesGeometry(geometry),
     new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
   );
-}
-
-function hullMaterial(emissive: number, intensity: number): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: 0x030508,
-    roughness: 0.05,
-    metalness: 0.94,
-    emissive,
-    emissiveIntensity: intensity,
-  });
 }
 
 function glowMaterial(
@@ -406,151 +382,184 @@ function glowMaterial(
 function buildHoverboard(bank: THREE.Group, player: PlayerInfo) {
   const color = new THREE.Color(player.color);
   const glow = color.getHex();
+  const accent2 = color.clone().lerp(new THREE.Color(TIDE_MAGENTA), 0.42).getHex();
   const hero = !player.isBot;
-  const bodyW = 1.72;
-  const bodyD = 3.72;
 
-  // Keep the deck thin and wide: a beveled surf/skate profile, not a pod.
-  const deckGeo = new RoundedBoxGeometry(bodyW, 0.18, bodyD, 8, 0.28);
-  const deck = new THREE.Mesh(deckGeo, hullMaterial(glow, hero ? 0.18 : 0.1));
-  deck.position.y = 0.11;
-  bank.add(deck);
+  const shellMat = new THREE.MeshPhysicalMaterial({
+    color: 0x120a1e,
+    metalness: 0.42,
+    roughness: 0.16,
+    emissive: glow,
+    emissiveIntensity: hero ? 0.42 : 0.24,
+    clearcoat: 1,
+    clearcoatRoughness: 0.1,
+  });
+
+  const pod = new THREE.Mesh(new THREE.SphereGeometry(0.52, 16, 12), shellMat);
+  pod.scale.set(1.38, 0.34, 1.95);
+  pod.position.set(0, 0.06, 0.06);
+  bank.add(pod);
+
+  for (const side of [-1, 1] as const) {
+    const wing = new THREE.Mesh(
+      new RoundedBoxGeometry(1.48, 0.042, 2.72, 10, 0.32),
+      shellMat,
+    );
+    wing.position.set(side * 0.84, 0.038, 0.1);
+    wing.rotation.set(0.05, side * 0.34, side * -0.1);
+    bank.add(wing);
+
+    const tip = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 8, 8),
+      glowMaterial(accent2, hero ? 2.6 : 1.5),
+    );
+    tip.position.set(side * 1.58, 0.048, 0.72);
+    bank.add(tip);
+  }
+
+  const crest = new THREE.Mesh(
+    new THREE.ConeGeometry(0.11, 0.38, 8),
+    glowMaterial(glow, hero ? 2.0 : 1.2),
+  );
+  crest.position.set(0, 0.11, -1.88);
+  crest.rotation.x = -Math.PI / 2 - 0.25;
+  bank.add(crest);
 
   const deckArt = new THREE.Mesh(
-    new THREE.PlaneGeometry(bodyW * 0.86, bodyD * 0.86),
-    surfaceMaterial("deck", 2, 5, glow, hero ? 0.48 : 0.34),
+    new THREE.PlaneGeometry(2.55, 3.35),
+    surfaceMaterial("deck", 1.1, 1.5, glow, hero ? 0.3 : 0.18),
   );
   deckArt.rotation.x = -Math.PI / 2;
-  deckArt.position.y = 0.19;
+  deckArt.position.set(0, 0.092, 0.08);
   bank.add(deckArt);
 
-  const stripGeo = new RoundedBoxGeometry(bodyW * 0.42, 0.03, bodyD * 0.62, 4, 0.02);
-  const deckStrip = new THREE.Mesh(stripGeo, glowMaterial(glow, hero ? 0.85 : 0.55));
-  deckStrip.position.y = 0.19;
-  bank.add(deckStrip);
-
-  const prow = new THREE.Mesh(
-    new THREE.SphereGeometry(0.055, 10, 10),
-    glowMaterial(glow, hero ? 2.4 : 1.6),
-  );
-  prow.scale.set(1, 0.55, 1.8);
-  prow.position.set(0, 0.18, -bodyD * 0.49);
-  bank.add(prow);
-
   const railL = new THREE.Mesh(
-    new THREE.BoxGeometry(0.1, 0.035, bodyD * 0.68),
-    glowMaterial(glow, hero ? 1.9 : 1.35),
+    new THREE.CylinderGeometry(0.022, 0.022, 3.25, 6),
+    glowMaterial(glow, hero ? 2.0 : 1.25),
   );
-  railL.position.set(-bodyW * 0.36, -0.01, 0.06);
+  railL.rotation.x = Math.PI / 2;
+  railL.position.set(-1.08, 0.062, 0.08);
   bank.add(railL);
 
   const railR = railL.clone();
-  railR.position.x = bodyW * 0.36;
+  railR.position.x = 1.08;
   bank.add(railR);
 
-  const railCore = new THREE.Mesh(
-    new THREE.BoxGeometry(bodyW * 0.22, 0.02, bodyD * 0.48),
-    glowMaterial(0xffffff, hero ? 1.1 : 0.75, { transparent: true, opacity: 0.85 }),
+  const deckStrip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.055, 10, 8),
+    glowMaterial(PEARL, hero ? 1.3 : 0.75, { transparent: true, opacity: 0.82 }),
   );
-  railCore.position.set(0, -0.025, 0.08);
-  bank.add(railCore);
+  deckStrip.position.set(0, 0.098, -0.15);
+  bank.add(deckStrip);
+
+  for (const side of [-1, 1] as const) {
+    const tail = new THREE.Mesh(
+      new THREE.ConeGeometry(0.038, 1.15, 6, 1, true),
+      glowMaterial(accent2, hero ? 1.5 : 0.9, { transparent: true, opacity: 0.5 }),
+    );
+    tail.position.set(side * 0.32, 0.028, 1.98);
+    tail.rotation.x = Math.PI / 2 + 0.18;
+    bank.add(tail);
+  }
 
   const hoverRing = new THREE.Mesh(
-    new RoundedBoxGeometry(bodyW * 0.7, 0.015, bodyD * 0.62, 6, 0.18),
+    new THREE.RingGeometry(0.48, 1.38, 52),
     new THREE.MeshBasicMaterial({
-      color: glow,
+      color: accent2,
       transparent: true,
-      opacity: hero ? 0.42 : 0.28,
+      opacity: hero ? 0.44 : 0.26,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
     }),
   );
-  hoverRing.position.y = -0.11;
+  hoverRing.rotation.x = -Math.PI / 2;
+  hoverRing.position.y = -0.048;
   bank.add(hoverRing);
 
-  const plasmaCore = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 10, 10),
-    glowMaterial(glow, 3.2, { transparent: true, opacity: 0.9 }),
+  const hoverCore = new THREE.Mesh(
+    new THREE.CircleGeometry(0.42, 32),
+    new THREE.MeshBasicMaterial({
+      color: glow,
+      transparent: true,
+      opacity: hero ? 0.32 : 0.16,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
   );
-  plasmaCore.position.set(0, 0.01, bodyD * 0.5);
+  hoverCore.rotation.x = -Math.PI / 2;
+  hoverCore.position.y = -0.042;
+  bank.add(hoverCore);
+
+  const plasmaCore = new THREE.Mesh(
+    new THREE.SphereGeometry(0.11, 10, 10),
+    glowMaterial(accent2, 3.6, { transparent: true, opacity: 0.9 }),
+  );
+  plasmaCore.position.set(0, 0.03, 2.05);
   plasmaCore.visible = false;
   bank.add(plasmaCore);
 
   const plasma = new THREE.Mesh(
-    new THREE.ConeGeometry(0.22, 0.85, 14, 1, true),
-    glowMaterial(glow, 2.4, { transparent: true, opacity: 0.65 }),
+    new THREE.ConeGeometry(0.22, 1.0, 14, 1, true),
+    glowMaterial(glow, 2.8, { transparent: true, opacity: 0.68 }),
   );
-  plasma.position.set(0, 0.01, bodyD * 0.54);
+  plasma.position.set(0, 0.03, 2.1);
   plasma.rotation.x = Math.PI;
   plasma.visible = false;
   bank.add(plasma);
 
-  bank.add(makeLabel(player.name + (player.isBot ? " ⚡" : ""), player.color));
+  bank.add(makeLabel(player.name + (player.isBot ? " ✦" : ""), player.color));
 
-  let heroOutline: THREE.LineSegments | null = null;
-  if (hero) {
-    const marker = new THREE.Mesh(
-      new THREE.RingGeometry(0.35, 0.55, 24),
-      new THREE.MeshBasicMaterial({
-        color: glow,
-        transparent: true,
-        opacity: 0.55,
-        depthTest: false,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-      }),
-    );
-    marker.rotation.x = -Math.PI / 2;
-    marker.position.y = 0.32;
-    marker.renderOrder = 1002;
-    bank.add(marker);
-  }
+  // A wireframe volume around the player intersects the board from the
+  // chase-camera angle and reads as tangled artifacts, so use the board glow
+  // itself as the player highlight.
+  const heroOutline: THREE.LineSegments | null = null;
 
   return { railL, railR, hoverRing, deckStrip, plasma, plasmaCore, heroOutline, isPlayer: hero };
 }
 
-function tronObstacle(w: number, h: number, d: number): THREE.Group {
+function buildCrystalObstacle(w: number, h: number, d: number): THREE.Group {
   const group = new THREE.Group();
-  const geo = new THREE.BoxGeometry(w, h, d);
-  group.add(
-    new THREE.Mesh(
-      geo,
-      new THREE.MeshStandardMaterial({
-        color: 0x010102,
-        roughness: 0.15,
-        metalness: 0.95,
-        emissive: TRON_CYAN_FAINT,
-        emissiveIntensity: 0.08,
-      }),
-    ),
-  );
-  group.add(wireframeShell(geo, TRON_CYAN));
-  addFaceDecal(group, w, h, d);
-  addTopArcs(group, w, d, h / 2 + 0.02, TRON_CYAN);
-  const pillarMat = new THREE.LineBasicMaterial({ color: TRON_CYAN, transparent: true, opacity: 0.65 });
-  const hx = w / 2;
-  const hz = d / 2;
-  for (const [px, pz] of [[hx, hz], [hx, -hz], [-hx, hz], [-hx, -hz]] as const) {
-    const pillarVerts = new Float32Array([px, -h / 2, pz, px, h / 2, pz]);
-    const pillarGeo = new THREE.BufferGeometry();
-    pillarGeo.setAttribute("position", new THREE.BufferAttribute(pillarVerts, 3));
-    group.add(new THREE.LineSegments(pillarGeo, pillarMat));
+  const radius = Math.min(w, d) * 0.48;
+  const geo = new THREE.CylinderGeometry(radius * 0.82, radius * 1.1, h, 7);
+  group.add(new THREE.Mesh(geo, structureMaterial(TIDE_MAGENTA)));
+
+  const bands = [TIDE_TEAL, TIDE_MAGENTA, TIDE_GOLD, TIDE_VIOLET];
+  for (let i = 0; i < 4; i++) {
+    const torus = new THREE.Mesh(
+      new THREE.TorusGeometry(radius * 1.04, 0.045, 6, 28),
+      glowMaterial(bands[i % bands.length], 1.15, { transparent: true, opacity: 0.72 }),
+    );
+    torus.rotation.x = Math.PI / 2;
+    torus.position.y = -h / 2 + (i + 1) * (h / 5);
+    group.add(torus);
   }
+
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(radius * 0.72, h * 0.2, 7),
+    glowMaterial(TIDE_TEAL, 0.95),
+  );
+  tip.position.y = h / 2 + h * 0.09;
+  group.add(tip);
+
+  addTopSpirals(group, w, d, h / 2 + 0.03, TIDE_GOLD);
   return group;
 }
 
 function makeTrailLine(color: number): THREE.Line {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute([], 3));
+  const accent = new THREE.Color(color).lerp(new THREE.Color(TIDE_MAGENTA), 0.35).getHex();
   return new THREE.Line(
     geo,
     new THREE.LineBasicMaterial({
-      color,
+      color: accent,
       transparent: true,
-      opacity: 0.78,
+      opacity: 0.72,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      linewidth: 2,
     }),
   );
 }
@@ -595,46 +604,37 @@ export class Renderer {
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(TRON_VOID);
-    this.scene.fog = new THREE.FogExp2(0x000812, 0.0028);
+    this.scene.background = new THREE.Color(VOID);
+    this.scene.fog = new THREE.FogExp2(0x180828, 0.0022);
 
     const trackStatic = (obj: THREE.Object3D) => {
       this.scene.add(obj);
       this.cameraBlockers.push(obj);
     };
 
-    const fill = new THREE.HemisphereLight(0x0a1828, 0x000000, 0.35);
+    const fill = new THREE.HemisphereLight(0x4a1868, 0x06010c, 0.55);
     this.scene.add(fill);
-    const key = new THREE.DirectionalLight(0x88ddff, 0.25);
-    key.position.set(20, 50, 10);
+    const key = new THREE.DirectionalLight(0xffb8e8, 0.35);
+    key.position.set(-25, 45, 18);
     this.scene.add(key);
+    const rim = new THREE.DirectionalLight(0x42ffd8, 0.22);
+    rim.position.set(30, 20, -25);
+    this.scene.add(rim);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2),
-      surfaceMaterial("circuit", ARENA_HALF / 3, ARENA_HALF / 3, TRON_CYAN, 0.2),
+      surfaceMaterial("sonar", ARENA_HALF / 2.5, ARENA_HALF / 2.5, TIDE_TEAL, 0.26),
     );
     ground.rotation.x = -Math.PI / 2;
     trackStatic(ground);
-    this.scene.add(makeTronGrid(ARENA_HALF * 2));
-    this.scene.add(makeHorizonRing(ARENA_HALF - 1));
+    this.scene.add(makeAuroraBackdrop());
+    this.scene.add(makeFloatingMotes());
 
     const mkWall = (x: number, z: number, w: number, d: number) => {
       const geo = new THREE.BoxGeometry(w, 4, d);
       const shell = new THREE.Group();
-      shell.add(
-        new THREE.Mesh(
-          geo,
-          new THREE.MeshStandardMaterial({
-            color: 0x010102,
-            roughness: 0.1,
-            metalness: 0.95,
-            emissive: TRON_CYAN_FAINT,
-            emissiveIntensity: 0.06,
-          }),
-        ),
-      );
-      shell.add(wireframeShell(geo, TRON_CYAN));
-      addFaceDecal(shell, w, 4, d, TRON_CYAN_DIM);
+      shell.add(new THREE.Mesh(geo, structureMaterial(TIDE_VIOLET)));
+      addFaceDecal(shell, w, 4, d, TIDE_GOLD);
       shell.position.set(x, 2, z);
       trackStatic(shell);
     };
@@ -644,60 +644,59 @@ export class Renderer {
     mkWall(ARENA_HALF + 1, 0, 2, ARENA_HALF * 2 + 4);
 
     for (const o of OBSTACLES) {
-      const obs = tronObstacle(o.w, o.h, o.d);
+      const obs = buildCrystalObstacle(o.w, o.h, o.d);
       obs.position.set(o.x, o.h / 2, o.z);
       trackStatic(obs);
     }
 
-    const deckMat = new THREE.MeshStandardMaterial({
-      color: 0x010102,
-      roughness: 0.12,
-      metalness: 0.95,
-      emissive: TRON_CYAN_FAINT,
-      emissiveIntensity: 0.1,
-    });
+    const padMat = structureMaterial(TIDE_TEAL);
     for (const p of PLATFORMS) {
-      const deckGeo = new THREE.BoxGeometry(p.w, 0.35, p.d);
+      const radius = Math.min(p.w, p.d) * 0.45;
       const deckGroup = new THREE.Group();
-      deckGroup.add(new THREE.Mesh(deckGeo, deckMat));
-      deckGroup.add(wireframeShell(deckGeo, TRON_CYAN));
-      addFaceDecal(deckGroup, p.w, 0.35, p.d);
-      addTopArcs(deckGroup, p.w, p.d, 0.35 / 2 + 0.02, TRON_CYAN);
+      deckGroup.add(
+        new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.9, radius * 1.05, 0.36, 8), padMat),
+      );
+      const top = new THREE.Mesh(
+        new THREE.CircleGeometry(radius * 0.86, 8),
+        surfaceMaterial("coral", 2.2, 2.2, TIDE_MAGENTA, 0.38),
+      );
+      top.rotation.x = -Math.PI / 2;
+      top.position.y = 0.19;
+      deckGroup.add(top);
+      addTopSpirals(deckGroup, p.w, p.d, 0.21, TIDE_GOLD);
       deckGroup.position.set(p.x, p.y - 0.15, p.z);
       trackStatic(deckGroup);
 
       const pillarH = Math.max(0.5, p.y - 0.35);
       if (pillarH > 0.8) {
-        const mkPillar = (px: number, pz: number) => {
-          const colGeo = new THREE.BoxGeometry(1.2, pillarH, 1.2);
-          const colGroup = new THREE.Group();
-          colGroup.add(new THREE.Mesh(colGeo, deckMat));
-          colGroup.add(wireframeShell(colGeo, TRON_CYAN_DIM));
-          addFaceDecal(colGroup, 1.2, pillarH, 1.2, TRON_CYAN_DIM);
-          colGroup.position.set(px, pillarH / 2, pz);
-          trackStatic(colGroup);
+        const mkRoot = (px: number, pz: number) => {
+          const rootVerts: number[] = [];
+          for (let i = 0; i <= 6; i++) {
+            const t = i / 6;
+            rootVerts.push(px, pillarH * (1 - t), pz, px + Math.sin(t * 4) * 0.15, pillarH * (1 - t) - 0.2, pz + Math.cos(t * 3) * 0.12);
+          }
+          const rootGeo = new THREE.BufferGeometry();
+          rootGeo.setAttribute("position", new THREE.Float32BufferAttribute(rootVerts, 3));
+          const roots = new THREE.LineSegments(
+            rootGeo,
+            new THREE.LineBasicMaterial({ color: TIDE_VIOLET, transparent: true, opacity: 0.45 }),
+          );
+          trackStatic(roots);
         };
-        mkPillar(p.x - p.w / 2 + 1.2, p.z - p.d / 2 + 1.2);
-        mkPillar(p.x + p.w / 2 - 1.2, p.z - p.d / 2 + 1.2);
-        mkPillar(p.x - p.w / 2 + 1.2, p.z + p.d / 2 - 1.2);
-        mkPillar(p.x + p.w / 2 - 1.2, p.z + p.d / 2 - 1.2);
+        mkRoot(p.x - p.w / 2 + 1.2, p.z - p.d / 2 + 1.2);
+        mkRoot(p.x + p.w / 2 - 1.2, p.z - p.d / 2 + 1.2);
+        mkRoot(p.x - p.w / 2 + 1.2, p.z + p.d / 2 - 1.2);
+        mkRoot(p.x + p.w / 2 - 1.2, p.z + p.d / 2 - 1.2);
       }
     }
 
-    const rampMat = new THREE.MeshStandardMaterial({
-      color: 0x010102,
-      roughness: 0.12,
-      metalness: 0.95,
-      emissive: TRON_CYAN_FAINT,
-      emissiveIntensity: 0.08,
-    });
+    const rampMat = structureMaterial(TIDE_MAGENTA);
     for (const r of RAMPS) {
       const pitch = Math.atan2(r.yHigh - r.yLow, r.length);
       const geo = new THREE.BoxGeometry(r.width, 0.28, r.length);
       const rampGroup = new THREE.Group();
       rampGroup.add(new THREE.Mesh(geo, rampMat));
-      rampGroup.add(wireframeShell(geo, TRON_CYAN));
-      addFaceDecal(rampGroup, r.width, 0.28, r.length);
+      addFaceDecal(rampGroup, r.width, 0.28, r.length, TIDE_GOLD);
       rampGroup.position.set(r.x, (r.yLow + r.yHigh) / 2, r.z);
       rampGroup.rotation.order = "YXZ";
       rampGroup.rotation.y = r.heading;
@@ -938,15 +937,15 @@ export class Renderer {
         if (grounded) {
           const ringMat = view.hoverRing.material as THREE.MeshBasicMaterial;
           ringMat.opacity =
-            (view.isPlayer ? 0.48 : 0.22) + Math.sin(t * 6) * 0.08;
+            (view.isPlayer ? 0.42 : 0.24) + Math.sin(t * 6) * 0.06;
           if (view.isPlayer) ringMat.depthTest = false;
-          const ringScale = 1 + Math.sin(t * 4.5) * 0.05 + Math.min(1, speed / MAX_SPEED) * 0.08;
+          const ringScale = 1 + Math.sin(t * 4.5) * 0.04 + Math.min(1, speed / MAX_SPEED) * 0.1;
           view.hoverRing.scale.set(ringScale, ringScale, 1);
           view.hoverRing.renderOrder = view.isPlayer ? 999 : 0;
         } else {
           const ringMat = view.hoverRing.material as THREE.MeshBasicMaterial;
-          ringMat.opacity = view.isPlayer ? 0.28 : 0.12;
-          view.hoverRing.scale.set(1.15, 1.15, 1);
+          ringMat.opacity = view.isPlayer ? 0.22 : 0.1;
+          view.hoverRing.scale.set(1.12, 1.12, 1);
         }
 
         if (view.isPlayer) {
