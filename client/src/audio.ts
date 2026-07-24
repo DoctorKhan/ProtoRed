@@ -38,7 +38,7 @@ export class GameAudio {
       // unlock called ensureEngine() before this bus existed, so the engine
       // could remain silent until a later event (or forever in a stationary
       // arena).
-      if (this.context.state === "running" && !this.master) {
+      if (!this.master) {
         this.master = this.context.createGain();
         this.master.gain.value = 0.9;
         this.master.connect(this.context.destination);

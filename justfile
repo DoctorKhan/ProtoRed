@@ -39,6 +39,10 @@ test-watch: ## Run tests in watch mode
 
 verify: check test build ## Full gate: types, tests, and a clean production build
 
+deploy: verify ## Push main — GitHub Actions publishes to GitHub Pages
+	git push origin main
+	@echo 'Pushed — GitHub Actions will publish to https://doctorkhan.github.io/ProtoRed/'
+
 clean: ## Remove build output and caches
 	rm -rf dist node_modules/.vite
 	@echo 'clean'

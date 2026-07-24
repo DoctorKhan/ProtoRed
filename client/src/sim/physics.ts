@@ -12,9 +12,15 @@ export interface CarControls {
 }
 
 export const HOVER_HEIGHT = 1.2;
-const JUMP_VELOCITY = 9;
-const AIR_GRAVITY = 22;
-const DROP_GRAVITY = 38;
+const JUMP_VELOCITY = 8.2;
+const AIR_GRAVITY = 30;
+const DROP_GRAVITY = 52;
+/** Forward drive while airborne — keeps jumps as arcs, not sustained flight. */
+const AIR_THROTTLE_FACTOR = 0.42;
+const AIR_STEER_FACTOR = 0.58;
+const AIR_LATERAL_GRIP = 0.32;
+const AIR_DRAG = 1.4;
+const LANDING_SNAP_GRAVITY = 18;
 const MASS = 120;
 const ENGINE_FORCE = 14000;
 const LAUNCH_BOOST_FORCE = 10000;
@@ -175,7 +181,11 @@ export class Physics {
     const y = body.translation().y;
     const vy = body.linvel().y;
     const target = this.targetHoverY(body);
-    return y <= target + 0.14 && Math.abs(vy) < 0.75;
+    return y <= target + 0.15 && Math.abs(vy) < 0.8;
+  }
+
+  private isAirborne(body: RAPIER.RigidBody): boolean {
+    return !this.isGrounded(body);
   }
 
   /** Keep cars inside the playable volume and recover from falls. */
@@ -223,15 +233,23 @@ export class Physics {
     const y = body.translation().y;
     const vy = body.linvel().y;
     const targetY = this.targetHoverY(body);
-    const airborne = y > targetY + 0.1 || vy > 0.75;
+    const airborne = this.isAirborne(body);
 
     if (airborne) {
-      const gravity = diving ? DROP_GRAVITY : AIR_GRAVITY;
+      let gravity = diving ? DROP_GRAVITY : AIR_GRAVITY;
+      // Pull down harder when descending near the hover deck so landings feel crisp.
+      if (vy < 0 && y < targetY + 2.2) {
+        gravity += LANDING_SNAP_GRAVITY * (1 - Math.max(0, y - targetY) / 2.2);
+      }
       body.addForce({ x: 0, y: -MASS * gravity, z: 0 }, true);
     } else {
       const dy = targetY - y;
-      const lift = dy * 48 + Math.abs(dy) * 26;
+      const lift = dy * 52 + Math.abs(dy) * 30;
       body.addForce({ x: 0, y: Math.max(0, lift), z: 0 }, true);
+      // Bleed vertical bounce when settling onto the deck.
+      if (Math.abs(dy) < 0.08 && Math.abs(vy) < 1.2) {
+        body.setLinvel({ x: body.linvel().x, y: vy * 0.72, z: body.linvel().z }, true);
+      }
     }
 
     const ang = body.rotation();
@@ -245,11 +263,13 @@ export class Physics {
     body: RAPIER.RigidBody,
     input: { throttle: number; brake: number; steer: number; handbrake?: boolean },
     maxSpeed = MAX_SPEED,
+    dt = 1 / 60,
   ) {
     body.resetForces(true);
 
     const targetY = this.targetHoverY(body);
     const diving = input.brake > 0 && body.translation().y > targetY + 0.12;
+    const airborne = this.isAirborne(body);
     this.updateHover(body, diving);
     const rot = body.rotation();
     const fwd = rotateYawVector(rot, { x: 0, z: -1 });
@@ -257,6 +277,11 @@ export class Physics {
     const v = body.linvel();
     const speed = v.x * fwd.x + v.z * fwd.z;
     const mag = Math.hypot(v.x, v.z);
+
+    if (airborne) {
+      const drag = Math.exp(-AIR_DRAG * dt);
+      body.setLinvel({ x: v.x * drag, y: v.y, z: v.z * drag }, true);
+    }
 
     const throttleCurve = Math.pow(input.throttle, FORWARD_ACCEL_CURVE);
     let force = 0;
@@ -266,6 +291,7 @@ export class Physics {
       const launchFactor = 1 - Math.min(1, Math.max(0, speed) / LAUNCH_BOOST_END_SPEED);
       force += throttleCurve * (ENGINE_FORCE + LAUNCH_BOOST_FORCE * launchFactor);
     }
+    if (airborne) force *= AIR_THROTTLE_FACTOR;
     if (input.brake > 0) {
       if (speed > 0.5) force -= input.brake * BRAKE_FORCE * BRAKE_BIAS;
       else if (speed > -MAX_REVERSE) force -= input.brake * ENGINE_FORCE * 0.45;
@@ -279,7 +305,8 @@ export class Physics {
     const steerEffect = 0.45 + 0.55 * Math.min(1, Math.max(0, Math.abs(speed) / 18));
     const highSpeedScale = 1 - 0.2 * Math.max(0, (Math.abs(speed) - 8) / (maxSpeed - 8));
     const reverse = speed < -0.5 ? -1 : 1;
-    const targetYaw = input.steer * MAX_TURN_RATE * steerEffect * highSpeedScale * reverse;
+    const steerScale = airborne ? AIR_STEER_FACTOR : 1;
+    const targetYaw = input.steer * MAX_TURN_RATE * steerEffect * highSpeedScale * reverse * steerScale;
     const currentYaw = body.angvel().y;
     // Snap into a turn quickly from launch, then retain the smoother response at speed.
     const lowSpeedT = Math.min(1, Math.abs(speed) / 18);
@@ -291,7 +318,8 @@ export class Physics {
     body.setAngvel({ x: 0, y: yawRate, z: 0 }, true);
 
     const latSpeed = v.x * right.x + v.z * right.z;
-    const grip = input.handbrake ? BASE_LATERAL_GRIP * 0.45 : BASE_LATERAL_GRIP;
+    const gripBase = airborne ? AIR_LATERAL_GRIP : BASE_LATERAL_GRIP;
+    const grip = input.handbrake ? gripBase * 0.45 : gripBase;
     const lateralBrake = Math.max(0, (mag - 4) / 24);
     const impulse = -latSpeed * MASS * (grip + lateralBrake);
     body.applyImpulse({ x: right.x * impulse, y: 0, z: right.z * impulse }, true);
@@ -406,9 +434,12 @@ export class Physics {
     const y = body.translation().y;
     const vy = body.linvel().y;
     const targetY = this.targetHoverY(body);
-    if (y > targetY + 0.15 || Math.abs(vy) > 0.55) return false;
+    if (y > targetY + 0.12 || Math.abs(vy) > 0.45) return false;
     const v = body.linvel();
-    body.setLinvel({ x: v.x, y: JUMP_VELOCITY, z: v.z }, true);
+    const horiz = Math.hypot(v.x, v.z);
+    // Carry a bit of ground speed into the hop; idle jumps stay short.
+    const jumpVy = JUMP_VELOCITY + Math.min(2.2, horiz * 0.08);
+    body.setLinvel({ x: v.x, y: jumpVy, z: v.z }, true);
     return true;
   }
 }

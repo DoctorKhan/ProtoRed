@@ -540,6 +540,7 @@ export class Game {
         p.body,
         p.controls,
         p.isBot ? BASE_MAX_SPEED : this.humanMaxSpeed(),
+        dt,
       );
     }
     this.physics.step(dt);
@@ -875,7 +876,7 @@ export class Game {
     const v = p.body.linvel();
     const speed = Math.hypot(v.x, v.z);
     const trying = p.controls.throttle > 0.2 || p.controls.brake > 0.2;
-    if (trying && speed < 0.55) {
+    if (trying && speed < 0.55 && this.physics.isGrounded(p.body)) {
       if (p.stuckSince === undefined) p.stuckSince = now;
       else if (now - p.stuckSince > 2.8) {
         this.physics.unstick(p.body);
