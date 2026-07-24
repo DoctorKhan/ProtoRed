@@ -1,13 +1,24 @@
 import { Renderer } from "./render";
 import { readControls, setChatOpen } from "./input";
-import { updateCtfProgress } from "./ctf";
-import { bindUiHandlers, showGameUi, toggleControls, setTerminalMode, isTerminalOpen, setSidePanel, syncTextFocusMode, isTextFocusPaused } from "./ui";
+import {
+  bindKeyModal,
+  bindUiHandlers,
+  openKeyModal,
+  showGameUi,
+  toggleControls,
+  setTerminalMode,
+  isTerminalOpen,
+  syncTextFocusMode,
+  isTextFocusPaused,
+  resetTypingUi,
+} from "./ui";
 import { GameAudio } from "./audio";
 import { createPhysics } from "./sim/physics";
 import { Game, GameStateSnapshot } from "./sim/game";
 import { AUTO_MODEL, createBrowserBrain } from "./sim/botbrain";
 import { PlayerInfo } from "../../shared/protocol";
 import { REDBUCKS_START } from "../../shared/economy";
+import { START_PADDOCK } from "../../shared/arena";
 
 const app = document.getElementById("app")!;
 const joinOverlay = document.getElementById("join")!;
@@ -19,23 +30,46 @@ const telemetryLog = document.getElementById("telemetry-log")!;
 const keyStatus = document.getElementById("key-status")!;
 const hudSpeed = document.getElementById("hud-speed")!;
 const hudSpeedFill = document.getElementById("hud-speed-fill")!;
-const hudMission = document.getElementById("hud-mission")!;
+const hudStatus = document.getElementById("hud-status")!;
 const hudRedBucks = document.getElementById("hud-redbucks")!;
 const hudHull = document.getElementById("hud-hull")!;
 const hudRepair = document.getElementById("hud-repair")!;
 
 const audio = new GameAudio();
 audio.bindUnlock();
-let raceStarted = false;
 let playerGrounded = true;
 
 const KEY_LS = "pc_openrouter_key";
 const MODEL_LS = "pc_model";
 const NAME_LS = "pc_driver_name";
 const STYLE_LS = "pc_car_style";
-const ENV_KEY = (import.meta as any).env?.VITE_OPENROUTER_KEY?.trim() || null;
-const getKey = () => localStorage.getItem(KEY_LS) ?? ENV_KEY;
+const ENV_KEY =
+  import.meta.env.VITE_OPENROUTER_KEY?.trim() ||
+  import.meta.env.VITE_OPENROUTER_API_KEY?.trim() ||
+  null;
+
+function getStoredKey(): string | null {
+  const stored = localStorage.getItem(KEY_LS)?.trim();
+  return stored || null;
+}
+
+const getKey = () => getStoredKey() ?? ENV_KEY;
+
+function updateKeyStatus() {
+  const stored = getStoredKey();
+  const hasKey = !!getKey();
+  const envOnly = !!ENV_KEY && !stored;
+
+  keyStatus.hidden = envOnly;
+  if (envOnly) return;
+
+  keyStatus.textContent = hasKey ? "AI live" : "Add AI key";
+  keyStatus.classList.toggle("needs-key", !hasKey);
+}
+
+updateKeyStatus();
 const HMR_STATE_KEY = "redliner-hmr-state";
+const HMR_FLAG_KEY = "redliner-hmr-flag";
 
 const ADJECTIVES = [
   "Crimson",
@@ -150,7 +184,7 @@ function updateEconomyHud(m: {
     hudRepair.classList.add("visible");
     hudRepair.classList.toggle("danger", m.hull < 35);
   } else {
-    hudRepair.textContent = "Drive · red zones damage · N/S terminals for service";
+    hudRepair.textContent = "Drive · redline if past max speed · N/S terminals for service";
     hudRepair.classList.remove("visible", "danger");
   }
   renderer.setHudMaxSpeed(m.maxSpeed);
@@ -223,10 +257,14 @@ let simAccumulator = 0;
 let simPrevious = performance.now();
 const SIM_DT = 1 / 60;
 
+function applyRaceHud(live: boolean) {
+  hudStatus.textContent = live ? "CIRCUIT LIVE" : "LOBBY";
+}
+
 function frameLoop(now: number) {
   requestAnimationFrame(frameLoop);
   const paused = isTextFocusPaused();
-  if (game && raceStarted && !paused) {
+  if (game && !paused) {
     simAccumulator += Math.min(0.1, Math.max(0, (now - simPrevious) / 1000));
     simPrevious = now;
     let firstStep = true;
@@ -252,10 +290,10 @@ function frameLoop(now: number) {
     const kph = Math.round(speed * 3.6);
     hudSpeed.textContent = String(kph);
     hudSpeedFill.style.width = `${Math.min(100, (speed / maxSpeed) * 100)}%`;
-  } else if (game && raceStarted && paused) {
+  } else if (game && paused) {
     audio.updateEngine(0, 0, false, playerGrounded);
   }
-  if (!paused) renderer.render();
+  renderer.render();
 }
 requestAnimationFrame(frameLoop);
 
@@ -264,7 +302,7 @@ async function startGame() {
   const name = savedState?.humanName ?? randomDriverName();
   const key = getKey();
   if (joinStatus) joinStatus.textContent = "Loading arena…";
-  keyStatus.textContent = key ? "AI: automatic routing" : "AI: scripted";
+  updateKeyStatus();
 
   try {
     const physics = await createPhysics();
@@ -272,7 +310,7 @@ async function startGame() {
     if (joinHint)
       joinHint.textContent = key
         ? "Loading… press H anytime for controls"
-        : "No OpenRouter key · bots are scripted · H for controls";
+        : "No API key yet · H for controls";
     const brain = createBrowserBrain({
       getKey,
       getModel: () => AUTO_MODEL,
@@ -299,15 +337,6 @@ async function startGame() {
         appendChat(m.name, p?.color ?? "#dde3ee", m.isBot, m.text, m.to);
       },
       onBotDecision: (m) => appendTelemetry(m.name, m.action, m.source, m.say, m.model),
-      onCtfProgress: (m) => {
-        updateCtfProgress(m.level, m.solved);
-        if (m.level === 0) hudMission.textContent = "MISSION — COMPLETE";
-        else hudMission.textContent = `MISSION — L${m.level} ACTIVE`;
-      },
-      onCtfSolved: (m) => {
-        audio.ctfSolved();
-        appendSystem(`★ Solved Level ${m.level} — ${m.title}. Lesson: ${m.lesson}`);
-      },
       onNotice: (t) => appendSystem(t),
       onJump: (id) => {
         if (id === game?.myId) audio.jump();
@@ -320,25 +349,32 @@ async function startGame() {
         setTerminalMode(m.open, m.label);
         if (m.open) {
           setChatOpen(true);
-          setSidePanel("mission");
           window.setTimeout(() => chatInput.focus(), 80);
         } else {
           chatInput.blur();
           setChatOpen(false);
         }
       },
+      onRaceStart: () => {
+        applyRaceHud(true);
+        appendSystem("★ Gate cleared — circuit live.");
+      },
     });
 
     game.start();
     renderer.myId = game.join(name);
+    renderer.resetFollowCamera(START_PADDOCK.spawnX, START_PADDOCK.spawnZ);
     if (savedState) game.restoreState(savedState);
-    raceStarted = true;
+    resetTypingUi();
     joinOverlay.classList.add("hidden");
     showGameUi();
+    applyRaceHud(game.isRaceLive);
     appendSystem(
-      key
-        ? `Connected as ${name}. Race the circuit · terminals (N/S) auto-stop you for treasury chat.`
-        : `Connected as ${name}. Scripted bots · roll into N/S terminals · AI pill for key.`,
+      game.isRaceLive
+        ? key
+          ? `Connected as ${name}. Circuit live · N/S terminals auto-stop you for service chat.`
+          : `Connected as ${name}. Circuit live · add an AI key from the pill when ready.`
+        : `Connected as ${name}. Roll onto the gold START pad — magnetic launch onto the circuit.`,
     );
 
     bindUiHandlers({
@@ -364,14 +400,37 @@ async function startGame() {
 
 function readHmrState(): GameStateSnapshot | null {
   if (!import.meta.hot) return null;
+  // Only restore after Vite HMR — not after a full hard refresh (beforeunload also fires).
+  if (sessionStorage.getItem(HMR_FLAG_KEY) !== "1") {
+    sessionStorage.removeItem(HMR_STATE_KEY);
+    return null;
+  }
+  sessionStorage.removeItem(HMR_FLAG_KEY);
   const raw = sessionStorage.getItem(HMR_STATE_KEY);
   sessionStorage.removeItem(HMR_STATE_KEY);
   if (!raw) return null;
-  try { return JSON.parse(raw) as GameStateSnapshot; } catch { return null; }
+  try {
+    const state = JSON.parse(raw) as GameStateSnapshot;
+    const human = state.players.find((player) => player.name === state.humanName);
+    if (!human || state.hull <= 0 || human.p.length < 3 || human.q.length < 4) return null;
+    if (![...human.p, ...human.q, ...human.v].every(Number.isFinite)) return null;
+
+    // Reject fallen/inverted poses rather than restoring the chase camera beneath
+    // the arena forever on every development reload.
+    const [qx, , qz] = human.q;
+    const upY = 1 - 2 * (qx * qx + qz * qz);
+    if (human.p[1] < 0.35 || human.p[1] > 20 || upY < 0.45) return null;
+    return state;
+  } catch {
+    return null;
+  }
 }
 
 function saveHmrState() {
-  if (game) sessionStorage.setItem(HMR_STATE_KEY, JSON.stringify(game.exportState()));
+  if (game) {
+    sessionStorage.setItem(HMR_STATE_KEY, JSON.stringify(game.exportState()));
+    sessionStorage.setItem(HMR_FLAG_KEY, "1");
+  }
 }
 
 // Continuous arena: begin as soon as the physics runtime is ready.
@@ -414,18 +473,25 @@ function startChatUi() {
   });
 }
 
-keyStatus.addEventListener("click", () => {
-  const next = window.prompt(
-    "OpenRouter API key (stored in this browser's localStorage only). Leave blank for scripted bots.",
-    getKey() ?? "",
-  );
-  if (next === null) return;
-  if (next.trim()) localStorage.setItem(KEY_LS, next.trim());
+function saveOpenRouterKey(next: string | null) {
+  const hadKey = !!getStoredKey();
+  if (next) localStorage.setItem(KEY_LS, next);
   else localStorage.removeItem(KEY_LS);
-  keyStatus.textContent = getKey() ? "AI: automatic routing" : "AI: scripted";
+  updateKeyStatus();
+  if (next && !hadKey) {
+    appendSystem("AI key saved — bots will use live LLM on next think.");
+  } else if (next && hadKey) {
+    appendSystem("AI key updated — bots will use live LLM on next think.");
+  } else if (!next && hadKey) {
+    appendSystem("AI key removed — bots running scripted.");
+  }
+}
+
+bindKeyModal();
+keyStatus.addEventListener("click", () => {
+  openKeyModal(getStoredKey() ?? "", saveOpenRouterKey);
 });
 
 if (import.meta.hot) {
   import.meta.hot.dispose(saveHmrState);
 }
-window.addEventListener("beforeunload", saveHmrState);

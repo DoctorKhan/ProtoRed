@@ -17,6 +17,8 @@ const AIR_GRAVITY = 22;
 const DROP_GRAVITY = 38;
 const MASS = 120;
 const ENGINE_FORCE = 14000;
+const LAUNCH_BOOST_FORCE = 10000;
+const LAUNCH_BOOST_END_SPEED = 14;
 const BRAKE_FORCE = 18000;
 const MAX_SPEED = 34;
 const MAX_REVERSE = 11;
@@ -210,7 +212,7 @@ export class Physics {
   }
 
   step(dt: number) {
-    const substeps = 3;
+    const substeps = 6;
     const h = Math.min(dt / substeps, 1 / 60);
     this.world.timestep = h;
     for (let i = 0; i < substeps; i++) this.world.step();
@@ -228,7 +230,7 @@ export class Physics {
       body.addForce({ x: 0, y: -MASS * gravity, z: 0 }, true);
     } else {
       const dy = targetY - y;
-      const lift = dy * 220 + Math.abs(dy) * 80;
+      const lift = dy * 48 + Math.abs(dy) * 26;
       body.addForce({ x: 0, y: Math.max(0, lift), z: 0 }, true);
     }
 
@@ -258,7 +260,12 @@ export class Physics {
 
     const throttleCurve = Math.pow(input.throttle, FORWARD_ACCEL_CURVE);
     let force = 0;
-    if (throttleCurve > 0 && speed < maxSpeed) force += throttleCurve * ENGINE_FORCE;
+    if (throttleCurve > 0 && speed < maxSpeed) {
+      // Extra low-speed torque makes the board leap off the line, then fades out
+      // before mid-speed so upgrades and the existing top-speed balance stay intact.
+      const launchFactor = 1 - Math.min(1, Math.max(0, speed) / LAUNCH_BOOST_END_SPEED);
+      force += throttleCurve * (ENGINE_FORCE + LAUNCH_BOOST_FORCE * launchFactor);
+    }
     if (input.brake > 0) {
       if (speed > 0.5) force -= input.brake * BRAKE_FORCE * BRAKE_BIAS;
       else if (speed > -MAX_REVERSE) force -= input.brake * ENGINE_FORCE * 0.45;
@@ -274,7 +281,13 @@ export class Physics {
     const reverse = speed < -0.5 ? -1 : 1;
     const targetYaw = input.steer * MAX_TURN_RATE * steerEffect * highSpeedScale * reverse;
     const currentYaw = body.angvel().y;
-    const yawRate = currentYaw + (targetYaw - currentYaw) * 0.35;
+    // Snap into a turn quickly from launch, then retain the smoother response at speed.
+    const lowSpeedT = Math.min(1, Math.abs(speed) / 18);
+    const turnInResponse = 0.68 + (0.35 - 0.68) * lowSpeedT;
+    // Releasing the stick should settle the board instead of carrying rotational inertia.
+    const yawDampingResponse = 0.86 + (0.62 - 0.86) * lowSpeedT;
+    const yawResponse = Math.abs(input.steer) < 0.04 ? yawDampingResponse : turnInResponse;
+    const yawRate = currentYaw + (targetYaw - currentYaw) * yawResponse;
     body.setAngvel({ x: 0, y: yawRate, z: 0 }, true);
 
     const latSpeed = v.x * right.x + v.z * right.z;
@@ -290,6 +303,15 @@ export class Physics {
     const v = body.linvel();
     body.setTranslation({ x: cx, y: t.y, z: cz }, true);
     body.setLinvel({ x: 0, y: v.y, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  /** Lift off the START pad and arc west onto the elevated circuit deck. */
+  launchFromStartPlatform(body: RAPIER.RigidBody) {
+    const t = body.translation();
+    body.setTranslation({ x: t.x, y: Math.max(t.y, HOVER_HEIGHT + 0.15), z: t.z }, true);
+    body.setRotation({ x: 0, y: Math.SQRT1_2, z: 0, w: Math.SQRT1_2 }, true);
+    body.setLinvel({ x: -8, y: 22, z: 0 }, true);
     body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 

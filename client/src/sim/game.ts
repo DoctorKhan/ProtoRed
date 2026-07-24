@@ -14,7 +14,6 @@ import {
   parseDirectedChat,
   BOT_NAMES,
 } from "../../../shared/brain";
-import { DecisionEvidence, detectLevel, creditFor, LEVELS, applyChatTransferCredit } from "../../../shared/detectors";
 import { ARENA_HALF, BotAction, CarState, PlayerInfo } from "../../../shared/protocol";
 import {
   HULL_DAMAGE_THRESHOLD,
@@ -33,12 +32,18 @@ import {
   pitZoneAt,
   repairGuide,
   repairGuideHint,
+  startPadAt,
   terminalAt,
   tickHull,
   trySpend,
   zonesAt,
 } from "../../../shared/economy";
-import { clampPlayable, pickSpawnPoint } from "../../../shared/arena";
+import {
+  clampPlayable,
+  pickSpawnPoint,
+  pickHumanSpawnPoint,
+  START_PADDOCK,
+} from "../../../shared/arena";
 import { checkHazardStrike } from "../../../shared/hazards";
 import { yawFromQuat, steerToward } from "../../../shared/mathutil";
 
@@ -86,12 +91,14 @@ export interface Player {
   dockZ?: number;
   /** Player closed terminal manually — skip auto-open until they leave the pad. */
   terminalDismissed?: boolean;
+  /** Start-platform capture remains latched until the board reaches the circuit. */
+  startCaptured?: boolean;
+  startLaunchCooldownUntil?: number;
 }
 
 export interface GameStateSnapshot {
   humanName: string | null;
   simTime: number;
-  ctfSolved: number[];
   chatLog: ChatEntry[];
   redBucks: number;
   hull: number;
@@ -110,8 +117,6 @@ export interface GameEvents {
     source: "llm" | "scripted";
     model: string | null;
   }) => void;
-  onCtfProgress?: (m: { level: number; solved: number[] }) => void;
-  onCtfSolved?: (m: { level: number; title: string; by: string; lesson: string }) => void;
   onNotice?: (text: string) => void;
   onJump?: (id: string) => void;
   onHazardHit?: (id: string) => void;
@@ -134,6 +139,7 @@ export interface GameEvents {
     bayCenterDist: number | null;
   }) => void;
   onTerminal?: (m: { open: boolean; label: string | null }) => void;
+  onRaceStart?: () => void;
 }
 
 export class Game {
@@ -143,7 +149,7 @@ export class Game {
   private stepCount = 0;
   private nextId = 1;
   private humanId: string | null = null;
-  private ctfSolved: number[] = [];
+  private raceLive = false;
 
   constructor(
     private physics: Physics,
@@ -157,6 +163,10 @@ export class Game {
 
   get time() {
     return this.simTime;
+  }
+
+  get isRaceLive() {
+    return this.raceLive;
   }
 
   private spawnPoint() {
@@ -197,7 +207,7 @@ export class Game {
   }
 
   join(name: string): string {
-    const { x, z, heading } = this.spawnPoint();
+    const { x, z, heading } = pickHumanSpawnPoint();
     const id = `p-${this.nextId++}`;
     this.humanId = id;
     const player: Player = {
@@ -216,8 +226,10 @@ export class Game {
     };
     this.players.set(id, player);
     this.events.onPlayerJoined?.(this.info(player));
-    this.emitCtfProgress();
     this.emitEconomy(player);
+    const t = player.body.translation();
+    this.initHumanRaceTracking(t.x, t.z);
+    this.events.onSnapshot?.(this.snapshot());
     return id;
   }
 
@@ -230,7 +242,6 @@ export class Game {
     return {
       humanName: human?.name ?? null,
       simTime: this.simTime,
-      ctfSolved: [...this.ctfSolved],
       chatLog: this.chatLog.map((m) => ({ ...m })),
       redBucks: human?.redBucks ?? REDBUCKS_START,
       hull: human?.hull ?? HULL_START,
@@ -244,7 +255,6 @@ export class Game {
 
   restoreState(state: GameStateSnapshot) {
     this.simTime = state.simTime;
-    this.ctfSolved = [...state.ctfSolved];
     this.chatLog = state.chatLog.map((m) => ({ ...m }));
     const human = this.humanId ? this.players.get(this.humanId) : null;
     if (human) {
@@ -260,7 +270,10 @@ export class Game {
       p.body.setLinvel({ x: saved.v[0], y: saved.v[1], z: saved.v[2] }, true);
       if (p.bot && saved.action) { p.bot.action = { ...saved.action }; p.bot.nextThinkAt = saved.nextThinkAt ?? this.simTime + 1; }
     }
-    this.emitCtfProgress();
+    if (human) {
+      const t = human.body.translation();
+      this.initHumanRaceTracking(t.x, t.z);
+    }
   }
 
   setInput(c: CarControls) {
@@ -274,6 +287,11 @@ export class Game {
     const terminal = terminalAt(t.x, t.z);
     if (terminal) {
       // Magnetic bay — physics slides you to center; ignore driving input.
+      p.controls = { throttle: 0, brake: 0, steer: 0, handbrake: false };
+      return;
+    }
+    const startPadReady = this.simTime >= (p.startLaunchCooldownUntil ?? 0);
+    if (p.startCaptured || (startPadReady && startPadAt(t.x, t.z))) {
       p.controls = { throttle: 0, brake: 0, steer: 0, handbrake: false };
       return;
     }
@@ -508,6 +526,7 @@ export class Game {
     if (human && terminalAt(human.body.translation().x, human.body.translation().z)) {
       this.applyBayCentering(human, dt);
     }
+    if (human) this.applyStartBayCentering(human, dt);
     for (const p of this.players.values()) {
       if (p.bot) this.botControls(p);
       else this.humanControls(p);
@@ -525,7 +544,10 @@ export class Game {
     }
     this.physics.step(dt);
 
-    if (human) this.captureServiceBay(human, dt);
+    if (human) {
+      this.captureStartLift(human, dt);
+      this.captureServiceBay(human, dt);
+    }
 
     let humanHazardStrike = 0;
     for (const p of this.players.values()) {
@@ -582,6 +604,67 @@ export class Game {
   }
 
   // ---------- internals ----------
+
+  private initHumanRaceTracking(x: number, z: number) {
+    if (!startPadAt(x, z)) this.setRaceLive(true);
+  }
+
+  /** Center the board on the START lift, matching service-platform capture. */
+  private applyStartBayCentering(human: Player, dt: number) {
+    if (this.simTime < (human.startLaunchCooldownUntil ?? 0)) return;
+    const t = human.body.translation();
+    const pad = startPadAt(t.x, t.z);
+    if (!pad && !human.startCaptured) return;
+    if (!human.startCaptured) {
+      human.startCaptured = true;
+      this.events.onNotice?.("START lift locked — raising board into the circuit.");
+    }
+    human.controls = { throttle: 0, brake: 0, steer: 0, handbrake: false };
+    this.physics.pullToBayCenter(
+      human.body,
+      START_PADDOCK.spawnX,
+      START_PADDOCK.spawnZ,
+      BAY_SLIDE_DIST,
+      dt,
+    );
+  }
+
+  /** Once centered, lift and drop the board onto the elevated circuit. */
+  private captureStartLift(human: Player, dt: number) {
+    if (this.simTime < (human.startLaunchCooldownUntil ?? 0)) return;
+    const t = human.body.translation();
+    const pad = startPadAt(t.x, t.z);
+    if (!pad && !human.startCaptured) return;
+
+    let centered = false;
+    if (pad || human.startCaptured) {
+      human.controls = { throttle: 0, brake: 0, steer: 0, handbrake: false };
+      centered = this.physics.pullToBayCenter(
+        human.body,
+        START_PADDOCK.spawnX,
+        START_PADDOCK.spawnZ,
+        BAY_SLIDE_DIST,
+        dt,
+      );
+    }
+
+    if (centered) {
+      human.startCaptured = false;
+      human.startLaunchCooldownUntil = this.simTime + 1.8;
+      this.physics.launchFromStartPlatform(human.body);
+      if (!this.raceLive) this.setRaceLive(true);
+    }
+  }
+
+  private setRaceLive(live: boolean) {
+    if (this.raceLive === live) return;
+    this.raceLive = live;
+    if (live) {
+      const human = this.humanId ? this.players.get(this.humanId) : null;
+      if (human) human.startCaptured = false;
+      this.events.onRaceStart?.();
+    }
+  }
 
   private info(p: Player): PlayerInfo {
     return { id: p.id, name: p.name, isBot: p.isBot, color: p.color };
@@ -654,9 +737,6 @@ export class Game {
       const promptChat = this.chatLog.slice(-CHAT_FOR_PROMPT);
       const decision = await this.decide(bot.persona, self, others, promptChat, bot.action);
 
-      const human = this.humanId ? this.players.get(this.humanId) : null;
-      const balanceBefore = human?.redBucks;
-
       bot.action = decision.action;
       bot.wander = null;
       this.events.onBotDecision?.({
@@ -671,65 +751,20 @@ export class Game {
         this.events.onChat?.({ id: p.id, name: p.name, isBot: true, text: decision.say });
         this.expediteMentionedBots(decision.say);
       }
-
-      if (human) {
-        const credit = applyChatTransferCredit({
-          activeLevelId: this.currentLevelId(),
-          botName: p.name,
-          hardening: bot.persona.hardening,
-          secret: bot.persona.secret,
-          humanName: human.name,
-          balance: human.redBucks ?? REDBUCKS_START,
-          decision: decision.action,
-          say: decision.say,
-          rawAction: decision.raw?.action ?? null,
-          recentChat: promptChat,
-        });
-        if (credit) {
-          human.redBucks = credit.balance;
-          this.events.onNotice?.(
-            `Ledger +${credit.credited} RB — ${p.name} confirmed in chat (unverified wire).`,
-          );
-          this.emitEconomy(human);
-        }
-      }
-
-      const balanceAfter = human?.redBucks;
-
-      this.evaluateCtf({
-        bot: p.name,
-        hardening: bot.persona.hardening,
-        secret: bot.persona.secret,
-        decision: decision.action,
-        say: decision.say,
-        rawAction: decision.raw?.action ?? null,
-        recentChat: promptChat,
-        humanBalanceBefore: balanceBefore,
-        humanBalanceAfter: balanceAfter,
-      });
     } finally {
       bot.thinking = false;
       bot.nextThinkAt = this.simTime + BOT_THINK_S + Math.random() * 3;
     }
   }
 
-  private currentLevelId(): number | null {
-    const next = LEVELS.find((l) => !this.ctfSolved.includes(l.id));
-    return next ? next.id : null;
-  }
-
-  private emitCtfProgress() {
-    this.events.onCtfProgress?.({
-      level: this.currentLevelId() ?? 0,
-      solved: [...this.ctfSolved],
-    });
-  }
-
   private emitEconomy(p: Player, activeZones = zonesAt(p.body.translation().x, p.body.translation().z)) {
     const t = p.body.translation();
-    const primary = activeZones[0] ?? null;
+    const primary = activeZones.find((zone) => zone.kind !== "start") ?? null;
     const hull = p.hull ?? HULL_START;
     const guide = repairGuide(t.x, t.z, hull, activeZones);
+    const lobbyGate = !this.raceLive
+      ? { x: START_PADDOCK.spawnX, z: START_PADDOCK.spawnZ }
+      : null;
     const pit = pitZoneAt(t.x, t.z);
     const speed = Math.hypot(p.body.linvel().x, p.body.linvel().z);
     const pitRate = pit ? pitRepairRate(pit, speed) : 0;
@@ -737,6 +772,8 @@ export class Game {
     const docked = isDocked(t.x, t.z, speed, terminal);
     const bayCapturing = !!terminal && !p.terminalOpen;
     const bayCenterDist = terminal ? distToZoneCenter(t.x, t.z, terminal) : null;
+    const zoneKind =
+      primary?.kind === "damage" || primary?.kind === "repair" ? primary.kind : null;
     this.events.onEconomy?.({
       redBucks: p.redBucks ?? 0,
       hull,
@@ -744,9 +781,13 @@ export class Game {
       inRepairBay: isInRepairBay(t.x, t.z),
       maxSpeed: this.humanMaxSpeed(),
       zoneLabel: primary?.label ?? null,
-      zoneKind: primary?.kind ?? null,
-      repairHint: guide ? repairGuideHint(guide) : null,
-      repairWaypoint: guide ? { x: guide.x, z: guide.z } : null,
+      zoneKind,
+      repairHint: lobbyGate
+        ? "Roll onto the gold START lift — it will raise and drop you into the circuit"
+        : guide
+          ? repairGuideHint(guide)
+          : null,
+      repairWaypoint: lobbyGate ?? (guide ? { x: guide.x, z: guide.z } : null),
       pitRepairing: pitRate > 0.5,
       pitNeedSlowdown: !!pit && pitRate <= 0,
       docked,
@@ -754,23 +795,6 @@ export class Game {
       canOpenTerminal: docked && !!terminal,
       bayCapturing,
       bayCenterDist,
-    });
-  }
-
-  private evaluateCtf(evidence: DecisionEvidence) {
-    const human = this.humanId ? this.players.get(this.humanId) : null;
-    if (!human) return;
-    if (creditFor(evidence) !== human.name) return;
-    const levelId = this.currentLevelId();
-    if (levelId === null || !detectLevel(levelId, evidence)) return;
-    this.ctfSolved.push(levelId);
-    const level = LEVELS.find((l) => l.id === levelId)!;
-    this.emitCtfProgress();
-    this.events.onCtfSolved?.({
-      level: levelId,
-      title: level.title,
-      by: human.name,
-      lesson: level.lesson,
     });
   }
 

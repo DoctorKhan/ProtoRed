@@ -1,6 +1,6 @@
-/** In-game HUD chrome: controls overlay, side-panel tabs, dock hints, terminal panel. */
+/** In-game HUD chrome: controls overlay, dock hints, terminal panel. */
 
-import { isChatOpen } from "./input";
+import { isChatOpen, setChatOpen } from "./input";
 
 const gameUi = document.getElementById("game-ui")!;
 const controlsOverlay = document.getElementById("controls-overlay")!;
@@ -11,14 +11,13 @@ const terminalPanel = document.getElementById("terminal-panel")!;
 const terminalTitle = document.getElementById("terminal-title")!;
 const focusScrim = document.getElementById("focus-scrim")!;
 const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
-const telemetry = document.getElementById("telemetry")!;
-const ctf = document.getElementById("ctf")!;
-const tabFeed = document.getElementById("tab-feed")!;
-const tabMission = document.getElementById("tab-mission")!;
+const keyModal = document.getElementById("key-modal")!;
+const keyModalInput = document.getElementById("key-modal-input") as HTMLInputElement;
 
 let controlsOpen = false;
 let terminalOpen = false;
-let activePanel: "feed" | "mission" = "mission";
+let keyModalOpen = false;
+let keyModalOnSave: ((key: string | null) => void) | null = null;
 
 export function showGameUi() {
   gameUi.classList.add("ready");
@@ -32,20 +31,39 @@ export function isTerminalOpen() {
   return terminalOpen;
 }
 
-/** True while the 3D view is blanked and sim/render are paused for typing. */
+export function isKeyModalOpen() {
+  return keyModalOpen;
+}
+
+/** True while typing in terminal/chat — pauses driving, not rendering. */
 export function isTextFocusPaused() {
-  return focusScrim.classList.contains("open");
+  return (
+    keyModalOpen ||
+    terminalOpen ||
+    isChatOpen() ||
+    (chatInput !== null && document.activeElement === chatInput)
+  );
 }
 
 export function syncTextFocusMode() {
-  const typing =
-    terminalOpen ||
-    isChatOpen() ||
-    (chatInput !== null && document.activeElement === chatInput);
+  const typing = isTextFocusPaused();
   focusScrim.classList.toggle("open", typing);
   focusScrim.setAttribute("aria-hidden", typing ? "false" : "true");
   document.body.classList.toggle("text-focus", typing);
   return typing;
+}
+
+/** Close terminal/chat overlays so the arena is visible on boot. */
+export function resetTypingUi() {
+  terminalOpen = false;
+  terminalPanel.classList.remove("open");
+  terminalPanel.setAttribute("aria-hidden", "true");
+  driveHint.style.display = "block";
+  setChatOpen(false);
+  chatInput?.blur();
+  focusScrim.classList.remove("open");
+  focusScrim.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("text-focus");
 }
 
 export function setTerminalMode(open: boolean, label: string | null = null) {
@@ -79,14 +97,49 @@ export function toggleControls(force?: boolean) {
   refreshDockHint();
 }
 
-export function setSidePanel(panel: "feed" | "mission") {
-  activePanel = panel;
-  telemetry.classList.toggle("hidden", panel !== "feed");
-  ctf.classList.toggle("hidden", panel !== "mission");
-  tabFeed.classList.toggle("active", panel === "feed");
-  tabMission.classList.toggle("active", panel === "mission");
-  tabFeed.setAttribute("aria-selected", panel === "feed" ? "true" : "false");
-  tabMission.setAttribute("aria-selected", panel === "mission" ? "true" : "false");
+export function openKeyModal(currentKey: string, onSave: (key: string | null) => void) {
+  keyModalOnSave = onSave;
+  keyModalOpen = true;
+  keyModal.classList.add("open");
+  keyModal.setAttribute("aria-hidden", "false");
+  keyModalInput.value = currentKey;
+  window.setTimeout(() => {
+    keyModalInput.focus();
+    keyModalInput.select();
+  }, 0);
+  syncTextFocusMode();
+}
+
+export function closeKeyModal() {
+  if (!keyModalOpen) return;
+  keyModalOpen = false;
+  keyModalOnSave = null;
+  keyModal.classList.remove("open");
+  keyModal.setAttribute("aria-hidden", "true");
+  keyModalInput.value = "";
+  keyModalInput.blur();
+  syncTextFocusMode();
+}
+
+function saveKeyModal() {
+  const handler = keyModalOnSave;
+  const next = keyModalInput.value.trim();
+  closeKeyModal();
+  handler?.(next || null);
+}
+
+export function bindKeyModal() {
+  document.getElementById("key-modal-save")?.addEventListener("click", saveKeyModal);
+  document.getElementById("key-modal-cancel")?.addEventListener("click", closeKeyModal);
+  keyModal.addEventListener("click", (e) => {
+    if (e.target === keyModal) closeKeyModal();
+  });
+  keyModalInput.addEventListener("keydown", (e) => {
+    if (e.code === "Enter") {
+      saveKeyModal();
+      e.preventDefault();
+    }
+  });
 }
 
 export function bindUiHandlers(opts: {
@@ -97,8 +150,6 @@ export function bindUiHandlers(opts: {
   controlsOverlay.addEventListener("click", (e) => {
     if (e.target === controlsOverlay) toggleControls(false);
   });
-  tabFeed.addEventListener("click", () => setSidePanel("feed"));
-  tabMission.addEventListener("click", () => setSidePanel("mission"));
 
   document.getElementById("terminal-close")?.addEventListener("click", () => {
     opts.onCloseTerminal?.();
@@ -110,13 +161,13 @@ export function bindUiHandlers(opts: {
       e.preventDefault();
       return;
     }
-    if (e.code === "KeyM" && document.activeElement !== document.getElementById("chat-input")) {
-      setSidePanel(activePanel === "mission" ? "feed" : "mission");
+    if (e.code === "Escape" && controlsOpen) {
+      toggleControls(false);
       e.preventDefault();
       return;
     }
-    if (e.code === "Escape" && controlsOpen) {
-      toggleControls(false);
+    if (e.code === "Escape" && keyModalOpen) {
+      closeKeyModal();
       e.preventDefault();
       return;
     }
@@ -137,5 +188,3 @@ export function bindUiHandlers(opts: {
     if (e.code === "Escape") opts.onEscape();
   });
 }
-
-setSidePanel("mission");

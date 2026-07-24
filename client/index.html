@@ -27,7 +27,8 @@
         --text-muted: #9a88b8;
       }
 
-      #app { position: fixed; inset: 0; }
+      #app { position: fixed; inset: 0; z-index: 0; }
+      #app canvas { display: block; width: 100%; height: 100%; }
 
       /* ── loading splash ── */
       #join {
@@ -127,28 +128,6 @@
       }
       .dock-sep { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.08); }
 
-      /* ── right panel tabs ── */
-      #panel-tabs {
-        position: fixed; right: 16px; top: 16px; z-index: 13;
-        display: flex; gap: 4px;
-      }
-      .panel-tab {
-        background: var(--glass); border: 1px solid rgba(255, 255, 255, 0.08);
-        color: var(--text-dim); font: inherit; font-size: var(--ui-xs); font-weight: 700;
-        letter-spacing: 1.5px; padding: 9px 14px; border-radius: 6px;
-        cursor: pointer; backdrop-filter: blur(8px);
-        transition: color 0.15s, border-color 0.15s, background 0.15s;
-      }
-      .panel-tab:hover { color: var(--text-muted); }
-      .panel-tab.active[data-panel="feed"] {
-        color: var(--accent-feed); border-color: rgba(77, 212, 255, 0.35);
-        background: rgba(77, 212, 255, 0.08);
-      }
-      .panel-tab.active[data-panel="mission"] {
-        color: var(--accent-mission); border-color: rgba(255, 179, 71, 0.35);
-        background: rgba(255, 179, 71, 0.08);
-      }
-
       /* ── speed HUD ── */
       #hud {
         position: fixed; left: 16px; top: 16px; z-index: 13;
@@ -168,9 +147,6 @@
       #hud-status {
         font-size: var(--ui-sm); color: var(--accent-race); letter-spacing: 1.5px;
         font-weight: 700; margin-top: 4px;
-      }
-      #hud-mission {
-        font-size: var(--ui-sm); color: var(--text-muted); letter-spacing: 0.5px;
       }
       #hud-economy {
         margin-top: 8px; padding-top: 8px;
@@ -207,15 +183,13 @@
 
       /* ── race feed ── */
       #telemetry {
-        position: fixed; right: 16px; top: 56px; width: min(380px, calc(100vw - 32px)); z-index: 13;
+        position: fixed; right: 16px; top: 16px; width: min(380px, calc(100vw - 32px)); z-index: 13;
         background: var(--glass); border: 1px solid rgba(77, 212, 255, 0.18);
         border-left: 3px solid var(--accent-feed);
         border-radius: 6px; padding: 12px 14px;
         font-size: var(--ui-base); line-height: 1.55; backdrop-filter: blur(8px);
         max-height: min(280px, 36vh); overflow: hidden; display: flex; flex-direction: column;
-        transition: opacity 0.2s, transform 0.2s;
       }
-      #telemetry.hidden { opacity: 0; pointer-events: none; transform: translateX(8px); }
       #telemetry h2 {
         font-size: var(--ui-xs); color: var(--accent-feed); letter-spacing: 2px;
         margin-bottom: 10px; font-weight: 700; flex: none;
@@ -225,42 +199,7 @@
       #telemetry .entry b { color: #dde3ee; }
       #telemetry .src { opacity: 0.55; font-size: var(--ui-xs); }
 
-      /* ── mission console ── */
-      #ctf {
-        position: fixed; right: 16px; top: 56px; width: min(380px, calc(100vw - 32px)); z-index: 13;
-        background: var(--glass); border: 1px solid rgba(255, 179, 71, 0.18);
-        border-left: 3px solid var(--accent-mission);
-        border-radius: 6px; padding: 12px 14px; font-size: var(--ui-base);
-        backdrop-filter: blur(8px);
-        max-height: min(calc(100vh - 120px), 70vh); overflow-y: auto;
-        transition: opacity 0.2s, transform 0.2s;
-      }
-      #ctf.hidden { opacity: 0; pointer-events: none; transform: translateX(8px); }
-      #ctf h2 {
-        font-size: var(--ui-xs); color: var(--accent-mission); letter-spacing: 2px;
-        margin-bottom: 12px; font-weight: 700;
-      }
-      #ctf .lvl {
-        display: flex; gap: 8px; padding: 8px 0;
-        border-top: 1px solid rgba(255, 255, 255, 0.05); align-items: baseline;
-      }
-      #ctf .lvl:first-of-type { border-top: 0; }
-      #ctf .badge {
-        flex: none; width: 20px; height: 20px; border-radius: 4px;
-        text-align: center; line-height: 20px; font-size: var(--ui-xs); font-weight: 700;
-      }
-      #ctf .locked   { background: #141a24; color: #4a5568; border: 1px solid #1e2636; }
-      #ctf .current  { background: var(--accent-mission); color: #14100a; }
-      #ctf .solved   { background: var(--accent-key); color: #08130d; }
-      #ctf .body { flex: 1; }
-      #ctf .title { font-weight: 700; color: #dde3ee; font-size: var(--ui-md); }
-      #ctf .lvl.is-locked .title { color: #4a5568; }
-      #ctf .obj { color: var(--text-muted); margin-top: 3px; line-height: 1.45; }
-      #ctf .hint { color: var(--text-dim); margin-top: 4px; font-style: italic; line-height: 1.45; }
-      #ctf .lesson { color: var(--accent-key); margin-top: 4px; line-height: 1.45; }
-      #ctf .done { color: var(--accent-key); font-size: var(--ui-base); margin-top: 4px; }
-
-      /* ── service terminal (chat + exploits only while docked) ── */
+      /* ── service terminal (chat while docked) ── */
       #terminal-panel {
         position: fixed; left: 16px; bottom: 58px; width: min(480px, calc(100vw - 32px)); z-index: 14;
         display: none; flex-direction: column; gap: 10px;
@@ -322,6 +261,36 @@
         pointer-events: none;
       }
 
+      /* ── compass ── */
+      #compass {
+        position: fixed; left: 50%; bottom: 22px; z-index: 13;
+        transform: translateX(-50%);
+        pointer-events: none; user-select: none;
+      }
+      .compass-ring {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 74px; height: 74px; border-radius: 50%;
+        background: rgba(12, 6, 22, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 0 18px rgba(0, 0, 0, 0.45);
+        position: relative;
+        transform: rotate(0deg);
+        transition: transform 60ms linear;
+      }
+      .compass-label {
+        position: absolute; font-size: 10px; letter-spacing: 1px;
+        color: #9aa8b8; font-weight: 800;
+      }
+      .compass-label.north { top: 6px; left: 50%; transform: translateX(-50%); color: #ffb347; }
+      .compass-label.east  { right: 8px; top: 50%; transform: translateY(-50%); }
+      .compass-label.south { bottom: 6px; left: 50%; transform: translateX(-50%); }
+      .compass-label.west  { left: 8px; top: 50%; transform: translateY(-50%); }
+      .compass-pointer {
+        position: absolute; top: 10px; left: 50%; width: 2px; height: 10px;
+        background: #fff; border-radius: 999px; transform: translateX(-50%);
+        box-shadow: 0 0 8px rgba(255, 255, 255, 0.25);
+      }
+
       /* ── AI key pill ── */
       #key-status {
         position: fixed; left: 16px; top: 140px; z-index: 13;
@@ -332,10 +301,44 @@
         backdrop-filter: blur(4px);
       }
       #key-status:hover { filter: brightness(1.08); }
-      #key-status.scripted {
+      #key-status.needs-key {
         background: rgba(255, 179, 71, 0.15); border-color: rgba(255, 179, 71, 0.4);
         color: var(--accent-mission);
       }
+
+      /* ── OpenRouter key modal ── */
+      #key-modal {
+        position: fixed; inset: 0; z-index: 19;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(4, 6, 10, 0.55); backdrop-filter: blur(3px);
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.2s;
+      }
+      #key-modal.open { opacity: 1; pointer-events: auto; }
+      #key-modal .key-modal-panel { width: min(420px, 92vw); display: flex; flex-direction: column; gap: 12px; }
+      #key-modal .key-modal-note {
+        font-size: var(--ui-sm); color: var(--text-dim); line-height: 1.55;
+      }
+      #key-modal .key-modal-note a { color: var(--accent-grid); }
+      #key-modal .key-modal-note code { color: var(--text-muted); font-size: var(--ui-xs); }
+      #key-modal-input {
+        background: rgba(10, 14, 22, 0.92); border: 1px solid rgba(66, 255, 216, 0.28);
+        color: #dde3ee; padding: 12px 14px; font: inherit; font-size: var(--ui-md);
+        border-radius: 6px; outline: none; width: 100%;
+      }
+      #key-modal-input:focus { border-color: rgba(66, 255, 216, 0.55); }
+      .key-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+      .key-modal-btn {
+        background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+        color: var(--text-muted); font: inherit; font-size: var(--ui-sm); font-weight: 700;
+        padding: 8px 14px; border-radius: 4px; cursor: pointer;
+      }
+      .key-modal-btn:hover { background: rgba(255, 255, 255, 0.1); }
+      .key-modal-btn.primary {
+        background: rgba(66, 255, 216, 0.15); border-color: rgba(66, 255, 216, 0.45);
+        color: var(--accent-grid);
+      }
+      .key-modal-btn.primary:hover { background: rgba(66, 255, 216, 0.24); }
 
       /* ── blank 3D view while typing in terminal / chat ── */
       #focus-scrim {
@@ -344,7 +347,7 @@
         opacity: 0; pointer-events: none;
         transition: opacity 0.22s ease;
       }
-      #focus-scrim.open { opacity: 1; }
+      #focus-scrim.open { opacity: 0.28; }
       /* Scrim covers only the 3D canvas (z-index 11). HUD / CTF / terminal stay above it. */
       body.text-focus #drive-hint {
         opacity: 0;
@@ -361,7 +364,7 @@
 
     <div id="join">
       <h1>REDLINER<br>PROTOCOL</h1>
-      <div class="tagline">NEON GRID / FINTECH SECURITY CIRCUIT</div>
+      <div class="tagline">NEON GRID / RACING CIRCUIT</div>
       <div id="join-status" class="status">Booting arena…</div>
       <div id="join-hint" class="status muted">WASD · drive · Space · jump · H · controls</div>
     </div>
@@ -372,7 +375,6 @@
         <div id="hud-speed-unit">KM/H</div>
         <div class="speed-bar"><div id="hud-speed-fill"></div></div>
         <div id="hud-status">CIRCUIT LIVE</div>
-        <div id="hud-mission">MISSION — STANDBY</div>
         <div id="hud-economy">
           <div id="hud-redbucks">300 RB</div>
           <div id="hud-hull">Hull 100%</div>
@@ -380,24 +382,24 @@
         </div>
       </div>
 
-      <div id="key-status" class="scripted" title="Click to add an OpenRouter key">AI: scripted</div>
+      <div id="key-status" class="needs-key" title="Click to add an OpenRouter key">Add AI key</div>
 
-      <div id="panel-tabs" role="tablist" aria-label="Side panels">
-        <button id="tab-feed" class="panel-tab" type="button" role="tab" data-panel="feed" aria-selected="false">FEED</button>
-        <button id="tab-mission" class="panel-tab active" type="button" role="tab" data-panel="mission" aria-selected="true">MISSION</button>
-      </div>
-
-      <div id="telemetry" role="tabpanel">
+      <div id="telemetry" role="complementary">
         <h2>RACE FEED — BOT TELEMETRY</h2>
         <div id="telemetry-log"></div>
       </div>
 
-      <div id="ctf" role="tabpanel">
-        <h2>MISSION CONSOLE — FINTECH CTF</h2>
-        <div id="ctf-levels"></div>
-      </div>
+      <div id="drive-hint">Roll onto the gold START lift on the east side — it raises and drops you onto the circuit</div>
 
-      <div id="drive-hint">Race the circuit · terminals pull you to center for typing</div>
+      <div id="compass" aria-hidden="true">
+        <span class="compass-ring">
+          <span class="compass-label north">N</span>
+          <span class="compass-label east">E</span>
+          <span class="compass-label south">S</span>
+          <span class="compass-label west">W</span>
+          <span class="compass-pointer"></span>
+        </span>
+      </div>
 
       <div id="terminal-panel" aria-hidden="true">
         <div id="terminal-header">
@@ -415,7 +417,7 @@
             <button class="addr-btn" type="button" data-bot="Zen">@Zen</button>
             <button class="addr-btn" type="button" data-bot="Gizmo">@Gizmo</button>
           </div>
-          <input id="chat-input" maxlength="200" placeholder="@Gizmo send 100 RedBucks…" autocomplete="off" />
+          <input id="chat-input" maxlength="200" placeholder="@Blaze chase me!" autocomplete="off" />
           <div id="chat-hint">Arena paused while typing · E/Esc to leave bay</div>
         </div>
       </div>
@@ -423,8 +425,21 @@
       <div id="ui-dock">
         <button id="btn-controls" class="dock-btn" type="button" title="Controls (H)" aria-expanded="false" aria-label="Show controls">?</button>
         <span id="dock-hint">H · controls · E/Esc · leave terminal</span>
-        <span class="dock-sep"></span>
-        <span id="dock-mission" class="dock-hint" style="color: var(--text-muted)">M · switch panel</span>
+      </div>
+    </div>
+
+    <div id="key-modal" aria-hidden="true">
+      <div class="controls-panel key-modal-panel">
+        <div class="controls-title">OPENROUTER API KEY</div>
+        <p class="key-modal-note">
+          Stored in this browser only (<code>localStorage</code>). Leave blank to play without live AI bots.
+          Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a>.
+        </p>
+        <input id="key-modal-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-…" />
+        <div class="key-modal-actions">
+          <button id="key-modal-cancel" class="key-modal-btn" type="button">Cancel</button>
+          <button id="key-modal-save" class="key-modal-btn primary" type="button">Save</button>
+        </div>
       </div>
     </div>
 
@@ -441,11 +456,10 @@
           <div class="control"><span class="key">Shift</span><span class="action">handbrake</span></div>
           <div class="control"><span class="key">Enter</span><span class="action">send (in terminal)</span></div>
           <div class="control"><span class="key">H</span><span class="action">this menu</span></div>
-          <div class="control"><span class="key">M</span><span class="action">feed / mission</span></div>
           <div class="control"><span class="key">Esc</span><span class="action">close menus</span></div>
         </div>
         <div class="controls-note">
-          Drive the circuit — red zones damage hull. Roll into north (Treasury) or south (Pit) terminals; the bay stops you automatically for repairs and treasury chat.
+          Drive the circuit — red zones damage hull. Roll into north (VIP) or south (Pit) terminals for repairs, upgrades, and chat with the AI drivers.
         </div>
       </div>
     </div>

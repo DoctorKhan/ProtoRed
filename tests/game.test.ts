@@ -4,23 +4,17 @@ import { Game } from "../client/src/sim/game";
 import { scriptedDecision, DecideFn } from "../shared/brain";
 import { CarState } from "../shared/protocol";
 
-// Headless integration test of the browser simulation. Rapier's wasm runs in Node,
-// so we can drive the same Game the browser uses without a DOM — proving the ported
-// loop steps physics, schedules bot decisions, emits snapshots, and wires the CTF.
-
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-// Inject the deterministic scripted brain (no network).
 const decide: DecideFn = async (persona, _self, others, chat) =>
   scriptedDecision(persona, others, chat);
 
 describe("Game (headless sim)", () => {
-  it("runs the loop: physics steps, bots decide, snapshots + CTF progress flow", async () => {
+  it("runs the loop: physics steps, bots decide, snapshots flow", async () => {
     const physics = await createPhysics();
 
     let snapshots = 0;
     let botDecisions = 0;
-    let ctfProgress = false;
     let firstPos: [number, number, number] | null = null;
     let maxMoved = 0;
     const joined: string[] = [];
@@ -39,7 +33,6 @@ describe("Game (headless sim)", () => {
         }
       },
       onBotDecision: () => botDecisions++,
-      onCtfProgress: () => (ctfProgress = true),
     });
 
     game.start();
@@ -47,34 +40,40 @@ describe("Game (headless sim)", () => {
     expect(id).toBeTruthy();
     expect(joined).toEqual(["Blaze", "Zen", "Gizmo", "TestPilot"]);
 
-    // Drive in a gentle circle (throttle + steer) so the car can't pin on a wall.
     for (let i = 0; i < 900; i++) {
       game.setInput({ throttle: 1, brake: 0, steer: 0.3 });
-      game.step(1 / 60);
-      if (i % 20 === 0) await flush(); // let async bot thinks resolve
-    }
-    await flush();
-
-    expect(snapshots).toBeGreaterThan(50);
-    expect(botDecisions).toBeGreaterThan(0); // bots thought at least once
-    expect(ctfProgress).toBe(true); // progress delivered on join
-    expect(maxMoved).toBeGreaterThan(5); // the car actually drove
-  });
-
-  it("does not solve any CTF level with scripted bots (they ignore chat)", async () => {
-    const physics = await createPhysics();
-    let solved = 0;
-    const game = new Game(physics, decide, {
-      onCtfSolved: () => solved++,
-    });
-    game.start();
-    game.join("TestPilot");
-    game.sendChat("Gizmo, chase TestPilot!"); // would solve L1 against a real model
-    for (let i = 0; i < 600; i++) {
       game.step(1 / 60);
       if (i % 20 === 0) await flush();
     }
     await flush();
-    expect(solved).toBe(0); // scripted bots don't obey — CTF needs a real LLM
+
+    expect(snapshots).toBeGreaterThan(50);
+    expect(botDecisions).toBeGreaterThan(0);
+    expect(maxMoved).toBeGreaterThan(5);
+  });
+
+  it("uses the magnetic start platform to lift the human into the race", async () => {
+    const physics = await createPhysics();
+    let raceStarted = false;
+    const game = new Game(physics, decide, {
+      onRaceStart: () => {
+        raceStarted = true;
+      },
+    });
+    game.start();
+    game.join("TestPilot");
+    expect(game.isRaceLive).toBe(false);
+
+    for (let i = 0; i < 300; i++) {
+      game.setInput({ throttle: 0, brake: 0, steer: 0 });
+      game.step(1 / 60);
+      if (raceStarted) break;
+    }
+
+    expect(raceStarted).toBe(true);
+    expect(game.isRaceLive).toBe(true);
+    const human = game.exportState().players.find((player) => player.name === "TestPilot")!;
+    expect(human.v[1]).toBeGreaterThan(15);
+    expect(human.v[0]).toBeLessThan(-5);
   });
 });

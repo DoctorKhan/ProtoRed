@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { ARENA_HALF, CarState, OBSTACLES, PLATFORMS, RAMPS, PlayerInfo } from "../../shared/protocol";
+import { START_PADDOCK } from "../../shared/arena";
 import { ARENA_ZONES } from "../../shared/economy";
 import { ARENA_HAZARDS, ArenaHazard, hazardAngle } from "../../shared/hazards";
 import { HOVER_HEIGHT } from "./sim/physics";
@@ -359,6 +360,134 @@ function makeFloatingMotes(): THREE.Group {
   return group;
 }
 
+interface ScenicActor {
+  object: THREE.Object3D;
+  baseY: number;
+  phase: number;
+  bob: number;
+  spin: number;
+  pulse?: THREE.Material;
+}
+
+function neonLine(points: THREE.Vector3[], color: number, radius = 0.045): THREE.Mesh {
+  const curve = new THREE.CatmullRomCurve3(points);
+  return new THREE.Mesh(
+    new THREE.TubeGeometry(curve, Math.max(12, points.length * 8), radius, 5, false),
+    glowMaterial(color, 1.8, { transparent: true, opacity: 0.78 }),
+  );
+}
+
+/** Distant silhouettes make the arena feel like one luminous sanctuary in a larger world. */
+function makeHorizonSanctuary(): THREE.Group {
+  const group = new THREE.Group();
+  const palette = [TIDE_TEAL, TIDE_MAGENTA, TIDE_VIOLET, TIDE_GOLD];
+  for (let side = 0; side < 4; side++) {
+    for (let i = -3; i <= 3; i++) {
+      const h = 10 + ((i * i + side * 7) % 5) * 4;
+      const color = palette[(i + side + 8) % palette.length];
+      const tower = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.7, 2.4, h, 5),
+        new THREE.MeshStandardMaterial({
+          color: 0x090510,
+          emissive: color,
+          emissiveIntensity: 0.08,
+          metalness: 0.7,
+          roughness: 0.35,
+        }),
+      );
+      body.position.y = h / 2 - 1;
+      tower.add(body);
+      const crown = new THREE.Mesh(
+        new THREE.OctahedronGeometry(1.1 + (i & 1) * 0.35, 0),
+        glowMaterial(color, 1.1, { transparent: true, opacity: 0.48 }),
+      );
+      crown.position.y = h - 0.2;
+      tower.add(crown);
+      const offset = i * 17;
+      if (side === 0) tower.position.set(offset, 0, -86);
+      else if (side === 1) tower.position.set(86, 0, offset);
+      else if (side === 2) tower.position.set(-offset, 0, 86);
+      else tower.position.set(-86, 0, -offset);
+      group.add(tower);
+    }
+  }
+  return group;
+}
+
+/** A different hovering crown over every district: compass, bloom, halo, and prism. */
+function makeDistrictCrown(kind: number, accent: number): THREE.Group {
+  const group = new THREE.Group();
+  const dark = structureMaterial(accent);
+  if (kind === 0) {
+    for (let i = 0; i < 6; i++) {
+      const petal = new THREE.Mesh(new THREE.ConeGeometry(0.6, 5.5, 5), dark);
+      petal.rotation.z = Math.PI / 2;
+      petal.rotation.y = (i / 6) * Math.PI * 2;
+      petal.position.set(Math.cos(petal.rotation.y) * 2.7, 0, Math.sin(petal.rotation.y) * 2.7);
+      group.add(petal);
+    }
+  } else if (kind === 1) {
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(2.1 + i * 0.72, 0.08, 6, 42),
+        glowMaterial(accent, 1.35, { transparent: true, opacity: 0.68 }),
+      );
+      ring.rotation.set(Math.PI / 2 + i * 0.45, i * 0.65, 0);
+      group.add(ring);
+    }
+  } else if (kind === 2) {
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(2.3, 1), dark);
+    group.add(core, wireframeShell(new THREE.IcosahedronGeometry(3.1, 1), accent, 0.48));
+    for (let i = 0; i < 4; i++) {
+      const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), glowMaterial(accent, 1.1));
+      shard.position.set(Math.cos(i * Math.PI / 2) * 4, (i & 1) * 0.8 - 0.4, Math.sin(i * Math.PI / 2) * 4);
+      group.add(shard);
+    }
+  } else {
+    const spine = neonLine([
+      new THREE.Vector3(-4, -1.5, 0),
+      new THREE.Vector3(-1.5, 1.2, 0),
+      new THREE.Vector3(0, -0.3, 0),
+      new THREE.Vector3(1.5, 1.2, 0),
+      new THREE.Vector3(4, -1.5, 0),
+    ], accent, 0.1);
+    group.add(spine);
+    for (const x of [-3.5, -1.7, 0, 1.7, 3.5]) {
+      const chime = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.8 + Math.abs(x) * 0.3, 6), glowMaterial(TIDE_GOLD, 1.2));
+      chime.position.set(x, -1.8, 0);
+      group.add(chime);
+    }
+  }
+  return group;
+}
+
+function makeRampGate(width: number, accent: number): THREE.Group {
+  const group = new THREE.Group();
+  const postMat = structureMaterial(accent);
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.42, 4.4, 6), postMat);
+    post.position.set(side * (width / 2 + 0.55), 2.15, 0);
+    post.rotation.z = side * -0.12;
+    group.add(post);
+  }
+  const arch = neonLine([
+    new THREE.Vector3(-width / 2 - 0.45, 3.8, 0),
+    new THREE.Vector3(-width * 0.24, 5.05, 0),
+    new THREE.Vector3(0, 5.45, 0),
+    new THREE.Vector3(width * 0.24, 5.05, 0),
+    new THREE.Vector3(width / 2 + 0.45, 3.8, 0),
+  ], accent, 0.075);
+  group.add(arch);
+  const sigil = new THREE.Mesh(
+    new THREE.RingGeometry(0.38, 0.58, 6),
+    new THREE.MeshBasicMaterial({ color: TIDE_GOLD, transparent: true, opacity: 0.78, side: THREE.DoubleSide }),
+  );
+  sigil.position.y = 4.72;
+  group.add(sigil);
+  return group;
+}
+
 function wireframeShell(geometry: THREE.BufferGeometry, color: number, opacity = 0.92): THREE.LineSegments {
   return new THREE.LineSegments(
     new THREE.EdgesGeometry(geometry),
@@ -390,6 +519,7 @@ function buildHoverboard(bank: THREE.Group, player: PlayerInfo) {
   const glow = color.getHex();
   const accent2 = color.clone().lerp(new THREE.Color(TIDE_MAGENTA), 0.42).getHex();
   const hero = !player.isBot;
+  const persona = hero ? "hero" : player.name.toLowerCase().includes("blaze") ? "blaze" : player.name.toLowerCase().includes("zen") ? "zen" : "gizmo";
 
   const shellMat = new THREE.MeshPhysicalMaterial({
     color: 0x120a1e,
@@ -430,6 +560,45 @@ function buildHoverboard(bank: THREE.Group, player: PlayerInfo) {
   crest.position.set(0, 0.11, -1.88);
   crest.rotation.x = -Math.PI / 2 - 0.25;
   bank.add(crest);
+
+  // Personality silhouettes remain legible even when labels overlap at racing speed.
+  if (persona === "blaze") {
+    for (const side of [-1, 1]) {
+      const blade = new THREE.Mesh(
+        new THREE.ConeGeometry(0.16, 1.45, 5),
+        glowMaterial(TIDE_MAGENTA, 1.25, { transparent: true, opacity: 0.66 }),
+      );
+      blade.position.set(side * 1.22, 0.22, 0.92);
+      blade.rotation.set(-0.42, 0, side * 0.28);
+      bank.add(blade);
+    }
+  } else if (persona === "zen") {
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(0.62, 0.045, 6, 32),
+      glowMaterial(TIDE_TEAL, 1.2, { transparent: true, opacity: 0.72 }),
+    );
+    halo.rotation.x = Math.PI / 2;
+    halo.position.set(0, 0.42, 0.25);
+    bank.add(halo);
+  } else if (persona === "gizmo") {
+    const antenna = neonLine([
+      new THREE.Vector3(0, 0.15, 0.45),
+      new THREE.Vector3(0.18, 0.7, 0.15),
+      new THREE.Vector3(-0.12, 1.05, -0.05),
+    ], TIDE_GOLD, 0.025);
+    const spark = new THREE.Mesh(new THREE.OctahedronGeometry(0.12, 0), glowMaterial(TIDE_GOLD, 2.2));
+    spark.position.set(-0.12, 1.05, -0.05);
+    bank.add(antenna, spark);
+  } else {
+    const prow = new THREE.Mesh(
+      new THREE.RingGeometry(0.2, 0.34, 3),
+      new THREE.MeshBasicMaterial({ color: PEARL, transparent: true, opacity: 0.86, side: THREE.DoubleSide }),
+    );
+    prow.rotation.x = -Math.PI / 2;
+    prow.rotation.z = Math.PI;
+    prow.position.set(0, 0.16, -1.72);
+    bank.add(prow);
+  }
 
   const deckArt = new THREE.Mesh(
     new THREE.PlaneGeometry(2.55, 3.35),
@@ -711,7 +880,9 @@ export class Renderer {
   private hudMaxSpeed = MAX_SPEED;
   private repairMarker = new THREE.Group();
   private hazardMeshes: THREE.Group[] = [];
+  private scenicActors: ScenicActor[] = [];
   private simTime = 0;
+  private compassEl: HTMLElement | null = null;
   myId: string | null = null;
 
   constructor(container: HTMLElement) {
@@ -729,10 +900,15 @@ export class Renderer {
     this.renderer.shadowMap.enabled = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
-    container.appendChild(this.renderer.domElement);
+    const canvas = this.renderer.domElement;
+    canvas.style.display = "block";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    container.appendChild(canvas);
 
     this.scene.background = new THREE.Color(VOID);
     this.scene.fog = new THREE.FogExp2(0x180828, 0.0022);
+    this.compassEl = document.getElementById("compass");
 
     const trackStatic = (obj: THREE.Object3D) => {
       this.scene.add(obj);
@@ -759,6 +935,37 @@ export class Renderer {
     trackStatic(ground);
     this.scene.add(makeAuroraBackdrop());
     this.scene.add(makeFloatingMotes());
+    this.scene.add(makeHorizonSanctuary());
+
+    const districtAccents = [TIDE_TEAL, TIDE_MAGENTA, TIDE_GOLD, TIDE_VIOLET];
+    const districtCenters = [
+      [-40, -40],
+      [40, -40],
+      [40, 40],
+      [-40, 40],
+    ] as const;
+    districtCenters.forEach(([x, z], i) => {
+      const crown = makeDistrictCrown(i, districtAccents[i]);
+      crown.position.set(x, 13 + (i & 1), z);
+      crown.rotation.y = i * Math.PI * 0.25;
+      this.scene.add(crown);
+      this.scenicActors.push({
+        object: crown,
+        baseY: crown.position.y,
+        phase: i * 1.7,
+        bob: 0.32 + i * 0.04,
+        spin: (i & 1 ? -1 : 1) * (0.035 + i * 0.008),
+      });
+      const districtLight = new THREE.PointLight(districtAccents[i], 0.42, 22, 2);
+      districtLight.position.set(x, 10, z);
+      this.scene.add(districtLight);
+    });
+
+    const oracle = makeDistrictCrown(2, PEARL);
+    oracle.scale.setScalar(1.35);
+    oracle.position.set(0, 23.5, 0);
+    this.scene.add(oracle);
+    this.scenicActors.push({ object: oracle, baseY: oracle.position.y, phase: 0.8, bob: 0.55, spin: -0.025 });
     this.scene.add(makeFloatingMotes());
 
     const mkWall = (x: number, z: number, w: number, d: number) => {
@@ -767,7 +974,7 @@ export class Renderer {
       shell.add(new THREE.Mesh(geo, structureMaterial(TIDE_VIOLET)));
       addFaceDecal(shell, w, 4, d, TIDE_GOLD);
       shell.position.set(x, 2, z);
-      trackCameraBlocker(shell);
+      trackStatic(shell);
     };
     mkWall(0, -ARENA_HALF - 1, ARENA_HALF * 2 + 4, 2);
     mkWall(0, ARENA_HALF + 1, ARENA_HALF * 2 + 4, 2);
@@ -822,7 +1029,8 @@ export class Renderer {
     }
 
     const rampMat = structureMaterial(TIDE_MAGENTA);
-    for (const r of RAMPS) {
+    for (let rampIndex = 0; rampIndex < RAMPS.length; rampIndex++) {
+      const r = RAMPS[rampIndex];
       const pitch = Math.atan2(r.yHigh - r.yLow, r.length);
       const geo = new THREE.BoxGeometry(r.width, 0.28, r.length);
       const rampGroup = new THREE.Group();
@@ -833,13 +1041,22 @@ export class Renderer {
       rampGroup.rotation.y = r.heading;
       rampGroup.rotation.x = pitch;
       trackStatic(rampGroup);
+
+      const tierAccent = rampIndex < 4 ? TIDE_TEAL : rampIndex < 8 ? TIDE_MAGENTA : TIDE_GOLD;
+      const gate = makeRampGate(r.width, tierAccent);
+      gate.position.set(r.x, (r.yLow + r.yHigh) / 2 + 0.25, r.z);
+      gate.rotation.y = r.heading;
+      trackStatic(gate);
+      const sigil = gate.children[gate.children.length - 1];
+      this.scenicActors.push({ object: sigil, baseY: sigil.position.y, phase: rampIndex * 0.55, bob: 0.12, spin: 0.18 });
     }
 
     for (const zone of ARENA_ZONES) {
       const zR = zone.radius;
       const group = new THREE.Group();
       const isDamage = zone.kind === "damage";
-      const accent = isDamage ? 0xff4422 : zone.paidRepair ? TIDE_GOLD : TIDE_TEAL;
+      const isStart = zone.kind === "start";
+      const accent = isDamage ? 0xff4422 : isStart ? TIDE_GOLD : zone.paidRepair ? TIDE_GOLD : TIDE_TEAL;
       const pad = new THREE.Mesh(
         new THREE.CylinderGeometry(zR * 0.92, zR, 0.1, 32),
         surfaceMaterial("coral", 3.2, 3.2, accent, isDamage ? 0.42 : 0.5),
@@ -862,8 +1079,12 @@ export class Renderer {
         const beacon = new THREE.PointLight(accent, 0.9, zR * 2, 2);
         beacon.position.y = 2.2;
         group.add(beacon);
-        const labelColor = zone.paidRepair ? "#ffcc55" : "#55eedd";
-        const labelText = zone.paidRepair ? "Repair Bay · E" : "Pit Stop · free";
+        const labelColor = isStart ? "#ffd080" : zone.paidRepair ? "#ffcc55" : "#55eedd";
+        const labelText = isStart
+          ? "START LIFT · roll in"
+          : zone.paidRepair
+            ? "Repair Bay · E"
+            : "Pit Stop · free";
         const label = makeLabel(labelText, labelColor);
         label.position.set(0, 4.5, 0);
         label.scale.multiplyScalar(1.1);
@@ -956,6 +1177,23 @@ export class Renderer {
 
   getHudState(): HudState {
     return { speed: this.playerSpeed, maxSpeed: this.hudMaxSpeed };
+  }
+
+  /** Update on-screen compass using the player quaternion at this frame. */
+  setCompassHeading(deg: number) {
+    if (!this.compassEl) return;
+    const ring = this.compassEl.firstElementChild as HTMLElement | null;
+    if (ring) ring.style.transform = `rotate(${deg.toFixed(2)}deg)`;
+  }
+
+  /** Snap chase cam to the spawn paddock so the first frame is never blank. */
+  resetFollowCamera(spawnX: number, spawnZ: number) {
+    this.cameraInitialized = false;
+    this.smoothCamPull = CAM_DIST_MIN;
+    this.camera.position.set(spawnX + CAM_DIST_MIN, CAM_HEIGHT_MIN, spawnZ);
+    this.lookTarget.set(spawnX, 1.2, spawnZ);
+    this.camera.lookAt(this.lookTarget);
+    this.camera.rotation.z = 0;
   }
 
   addCar(player: PlayerInfo) {
@@ -1051,13 +1289,30 @@ export class Renderer {
     this.cameraRay.set(focus, this.tmpCamDir);
     this.cameraRay.far = dist;
     const hits = this.cameraRay.intersectObjects(this.cameraBlockers, true);
-    const hit = hits.find((h) => (h.object as THREE.Mesh).isMesh);
+    const hit = hits.find((h) => {
+      if (!(h.object as THREE.Mesh).isMesh) return false;
+      // Elevated decks above the lens shouldn't pull the chase cam through nearby walls.
+      return h.point.y <= desired.y + 2.5;
+    });
     let targetPull = dist;
     if (hit && hit.distance < dist - 0.6) {
-      targetPull = Math.max(2.2, hit.distance - 0.6);
+      targetPull = Math.max(CAM_DIST_MIN * 0.85, hit.distance - 0.45);
     }
+    // Never collapse the lens through geometry — that reads as a blank screen.
+    targetPull = Math.max(CAM_DIST_MIN * 0.65, Math.min(dist, targetPull));
     this.smoothCamPull += (targetPull - this.smoothCamPull) * Math.min(1, frameDt * 4);
-    return focus.clone().add(this.tmpCamDir.clone().multiplyScalar(this.smoothCamPull));
+    const resolved = focus.clone().add(this.tmpCamDir.clone().multiplyScalar(this.smoothCamPull));
+    return this.clampCameraPosition(resolved);
+  }
+
+  /** Keep the lens inside the arena shell — wall clipping reads as a blank screen. */
+  private clampCameraPosition(pos: THREE.Vector3): THREE.Vector3 {
+    const inset = 6;
+    const half = ARENA_HALF - inset;
+    pos.x = THREE.MathUtils.clamp(pos.x, -half, half);
+    pos.z = THREE.MathUtils.clamp(pos.z, -half, half);
+    pos.y = Math.max(CAM_HEIGHT_MIN * 0.55, pos.y);
+    return pos;
   }
 
   private tmpQa = new THREE.Quaternion();
@@ -1070,6 +1325,14 @@ export class Renderer {
     this.lastFrameMs = nowMs;
     const renderTime = nowMs - INTERP_DELAY_MS;
     const pulse = 0.5 + Math.sin(this.simTime * 4.2) * 0.22;
+
+    for (const actor of this.scenicActors) {
+      actor.object.position.y = actor.baseY + Math.sin(this.simTime * 0.9 + actor.phase) * actor.bob;
+      actor.object.rotation.y += actor.spin * frameDt;
+      if (actor.pulse) {
+        actor.pulse.opacity = 0.45 + pulse * 0.35;
+      }
+    }
 
     for (const hg of this.hazardMeshes) {
       const h = hg.userData.hazard as ArenaHazard;
@@ -1153,6 +1416,10 @@ export class Renderer {
         yawQuat(view.smoothYaw, this.tmpYawQ);
         view.root.position.set(view.displayX, view.displayY, view.displayZ);
         view.root.quaternion.copy(this.tmpYawQ);
+
+        if (view.isPlayer) {
+          this.setCompassHeading(-view.smoothYaw * (180 / Math.PI));
+        }
 
         const yawStep = deltaYaw(view.lastYaw, view.smoothYaw);
         const yawRate = yawStep / frameDt;
@@ -1267,9 +1534,11 @@ export class Renderer {
 
         const resolved = this.resolveCameraPosition(this.tmpCamFocus, this.tmpCamDesired, frameDt);
         this.camera.position.lerp(resolved, camBlend);
+        this.clampCameraPosition(this.camera.position);
 
         if (!this.cameraInitialized) {
           this.camera.position.copy(resolved);
+          this.clampCameraPosition(this.camera.position);
           this.lookTarget.copy(this.tmpCamFocus);
           this.smoothCamPull = followDist;
           this.cameraInitialized = true;

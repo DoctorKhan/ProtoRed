@@ -165,8 +165,4 @@ export type ServerMsg =
       source: "llm" | "scripted";
       model: string | null;
     }
-  // CTF: this player's own progress (private), sent on welcome and on advance.
-  | { type: "ctf-progress"; level: number; solved: number[] }
-  // CTF: a level was solved by someone (broadcast to the whole arena feed).
-  | { type: "ctf-solved"; level: number; title: string; by: string; lesson: string }
   | { type: "snapshot"; t: number; cars: CarState[] };

@@ -2,6 +2,16 @@ import { describe, it, expect } from "vitest";
 import { createPhysics } from "../client/src/sim/physics";
 
 describe("physics collision", () => {
+  it("responds quickly to steering input from a standstill", async () => {
+    const physics = await createPhysics();
+    const body = physics.spawn(20, 20, 0);
+    physics.drive(body, { throttle: 1, brake: 0, steer: 1 });
+    expect(body.angvel().y).toBeGreaterThan(0.7);
+
+    physics.drive(body, { throttle: 1, brake: 0, steer: 0 });
+    expect(Math.abs(body.angvel().y)).toBeLessThan(0.15);
+  });
+
   it("stops at center obstacle when driving forward", async () => {
     const physics = await createPhysics();
     const body = physics.spawn(0, 20, 0);
